@@ -144,9 +144,8 @@ Final verification:
 
 Remaining risk:
 
-- The frontend npm audit reports only moderate PostCSS findings within Next's dependency tree.
+- No frontend PostCSS OSV finding remains after the final override regeneration.
 - Trivy reports 0 HIGH/CRITICAL vulnerabilities for both backend and frontend lockfiles.
-  <<<<<<< HEAD
 
 ## Enterprise OSV dependency remediation addendum
 
@@ -183,6 +182,34 @@ Verification after this remediation:
 | `npm run security:audit-npm` | Passed; 0 vulnerabilities              |
 | `npm run security:audit-ci`  | Passed; 0 vulnerabilities              |
 
-# Local Windows note: exact OSV CLI verification could not be completed because the Windows OSV binary download timed out and produced a corrupt executable. CI still installs the official Linux x64 OSV Scanner binary and scans both lockfiles. The backend lockfile now resolves the Enterprise OSV-reported packages to fixed installed versions.
+Local Windows note: exact OSV CLI verification could not be completed because the Windows OSV binary download timed out and produced a corrupt executable. CI still installs the official Linux x64 OSV Scanner binary and scans both lockfiles. The backend lockfile now resolves the Enterprise OSV-reported packages to fixed installed versions.
 
-> > > > > > > a1b8c0c1cff445126259345924e07d81a359e9bd
+## Final OSV frontend PostCSS remediation
+
+Live GitHub Actions logs for both remaining failed workflows showed the same frontend OSV finding:
+
+| Workflow                 | Failing step        | Package   | Version | Fixed version |
+| ------------------------ | ------------------- | --------- | ------- | ------------- |
+| Security Certification   | OSV dependency scan | `postcss` | 8.4.31  | 8.5.10        |
+| Enterprise Certification | OSV dependency scan | `postcss` | 8.4.31  | 8.5.10        |
+
+Root cause:
+
+- The vulnerable `postcss@8.4.31` was nested under the frontend Next.js dependency tree.
+- The top-level frontend `postcss` was already safe, but OSV scans the full lockfile and correctly failed on the nested vulnerable copy.
+
+Fix:
+
+- Added a frontend package override for `postcss`.
+- Aligned the direct frontend dev dependency to the same safe range.
+- Regenerated `frontend/package-lock.json`.
+
+Verification:
+
+| Command / check                               | Result                    |
+| --------------------------------------------- | ------------------------- |
+| frontend resolved `postcss`                   | 8.5.16                    |
+| `cd frontend && npm audit --audit-level=high` | Passed; 0 vulnerabilities |
+| `cd frontend && npm run build`                | Passed on Next.js 15.5.18 |
+
+No OSV ignores or allowlists were added.
