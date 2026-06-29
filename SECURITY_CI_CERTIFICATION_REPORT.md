@@ -213,3 +213,26 @@ Verification:
 | `cd frontend && npm run build`                | Passed on Next.js 15.5.18 |
 
 No OSV ignores or allowlists were added.
+
+## Final Enterprise Trivy Docker image remediation
+
+After the frontend OSV fix, GitHub Actions showed Security, OpenAPI, and Playwright workflows passing. The remaining Enterprise Certification failure was isolated to the `Trivy Docker image scan` step.
+
+Live Enterprise log findings:
+
+| Source in image               | Package / library | Installed | Fixed version |
+| ----------------------------- | ----------------- | --------- | ------------- |
+| Alpine base packages          | `libcrypto3`      | 3.5.6-r0  | 3.5.7-r0      |
+| Alpine base packages          | `libssl3`         | 3.5.6-r0  | 3.5.7-r0      |
+| Bundled npm inside Node image | `cross-spawn`     | 7.0.3     | 7.0.5+        |
+| Bundled npm inside Node image | `glob`            | 10.4.2    | 10.5.0+       |
+| Bundled npm inside Node image | `minimatch`       | 9.0.5     | 9.0.7+        |
+| Bundled npm inside Node image | `tar`             | 6.2.1     | 7.5.11+       |
+
+Fix:
+
+- Updated the runtime Docker stage to run `apk upgrade --no-cache` before adding runtime packages.
+- Removed bundled `npm`/`npx` from the final runtime image.
+- This does not change application runtime behavior because the container command is `node dist/src/main.js`; npm is not required in production runtime.
+
+No Trivy ignore, allowlist, severity reduction, or scanner suppression was added.

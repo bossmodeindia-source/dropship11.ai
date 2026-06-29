@@ -40,8 +40,12 @@ RUN npm ci --frozen-lockfile --omit=dev --legacy-peer-deps
 FROM node:20-alpine AS runner
 WORKDIR /app
 
-# Install FFmpeg — required by VideoPipelineOrchestrator for video assembly (V61)
-RUN apk add --no-cache ffmpeg
+# Install FFmpeg — required by VideoPipelineOrchestrator for video assembly (V61).
+# Upgrade Alpine security packages and remove bundled npm from the runtime image.
+# The container starts with `node dist/src/main.js`, so npm/npx are not required at runtime.
+RUN apk upgrade --no-cache && \
+    apk add --no-cache ffmpeg && \
+    rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 # Non-root user for security
 RUN addgroup --system --gid 1001 nodejs && \
