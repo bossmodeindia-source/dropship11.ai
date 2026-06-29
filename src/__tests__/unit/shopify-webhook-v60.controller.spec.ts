@@ -16,11 +16,7 @@ import { UnauthorizedException } from '@nestjs/common';
 import { createHmac }           from 'crypto';
 import { ShopifyWebhookV60Controller } from '../../shopify/shopify-webhook-v60.controller';
 import { OrdersService }        from '../../orders/orders.service';
-<<<<<<< HEAD
 import { getRedisToken }        from '../../common/redis/inject-redis';
-=======
-import { getRedisToken }        from '@liaoliaots/nestjs-redis';
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
 import { RedisHealthGuard }     from '../../common/redis/redis-health.guard';
 import { Reflector }            from '@nestjs/core';
 import { WebhookIdempotencyService } from '../../common/webhook/webhook-idempotency.service';

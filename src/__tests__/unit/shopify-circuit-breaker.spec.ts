@@ -10,11 +10,7 @@ import {
   CircuitState,
   CircuitOpenError,
 } from '../../shopify/shopify-circuit-breaker.service';
-<<<<<<< HEAD
 import { getRedisToken } from '../../common/redis/inject-redis';
-=======
-import { getRedisToken } from '@liaoliaots/nestjs-redis';
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
 
 describe('ShopifyCircuitBreaker', () => {
   let breaker: ShopifyCircuitBreaker;

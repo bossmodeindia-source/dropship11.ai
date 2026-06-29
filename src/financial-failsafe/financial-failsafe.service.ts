@@ -29,11 +29,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-<<<<<<< HEAD
 import { InjectRedis } from '../common/redis/inject-redis';
-=======
-import { InjectRedis } from '@liaoliaots/nestjs-redis';
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
 import Redis from 'ioredis';
 import { Pool } from 'pg';
 import { POOL_TOKEN } from '../common/database/database.module';

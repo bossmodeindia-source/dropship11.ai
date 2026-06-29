@@ -13,11 +13,7 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-<<<<<<< HEAD
 import { InjectRedis } from '../redis/inject-redis';
-=======
-import { InjectRedis } from '@liaoliaots/nestjs-redis';
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
 import { Redis } from 'ioredis';
 
 export interface IdempotencyResult {

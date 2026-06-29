@@ -46,11 +46,7 @@ import { DomainEventType }       from '../events/domain-events';
 import { sql, eq, and, lte }    from 'drizzle-orm';
 import { pgTable, uuid, text, jsonb, integer, timestamp } from 'drizzle-orm/pg-core';
 import { v4 as uuidv4 }         from 'uuid';
-<<<<<<< HEAD
 import { InjectRedis }           from '../redis/inject-redis';
-=======
-import { InjectRedis }           from '@liaoliaots/nestjs-redis';
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
 import type { Redis }            from 'ioredis';
 
 // ── Schema definition ─────────────────────────────────────────────────────────

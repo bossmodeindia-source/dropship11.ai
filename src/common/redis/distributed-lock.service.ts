@@ -26,11 +26,7 @@ import {
 } from '@nestjs/common';
 import { Redis }      from 'ioredis';
 import { v4 as uuid } from 'uuid';
-<<<<<<< HEAD
 import { InjectRedis } from './inject-redis';
-=======
-import { InjectRedis } from '@liaoliaots/nestjs-redis';
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
 
 export interface LockOptions {
   ttlMs?:          number;  // lock TTL (default 30_000 ms)

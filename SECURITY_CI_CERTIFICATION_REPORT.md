@@ -146,7 +146,7 @@ Remaining risk:
 
 - The frontend npm audit reports only moderate PostCSS findings within Next's dependency tree.
 - Trivy reports 0 HIGH/CRITICAL vulnerabilities for both backend and frontend lockfiles.
-<<<<<<< HEAD
+  <<<<<<< HEAD
 
 ## Enterprise OSV dependency remediation addendum
 
@@ -183,6 +183,6 @@ Verification after this remediation:
 | `npm run security:audit-npm` | Passed; 0 vulnerabilities              |
 | `npm run security:audit-ci`  | Passed; 0 vulnerabilities              |
 
-Local Windows note: exact OSV CLI verification could not be completed because the Windows OSV binary download timed out and produced a corrupt executable. CI still installs the official Linux x64 OSV Scanner binary and scans both lockfiles. The backend lockfile now resolves the Enterprise OSV-reported packages to fixed installed versions.
-=======
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
+# Local Windows note: exact OSV CLI verification could not be completed because the Windows OSV binary download timed out and produced a corrupt executable. CI still installs the official Linux x64 OSV Scanner binary and scans both lockfiles. The backend lockfile now resolves the Enterprise OSV-reported packages to fixed installed versions.
+
+> > > > > > > a1b8c0c1cff445126259345924e07d81a359e9bd

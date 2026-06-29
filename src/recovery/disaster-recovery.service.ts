@@ -22,11 +22,7 @@ import { NodePgDatabase }        from 'drizzle-orm/node-postgres';
 import { Queue }                 from 'bullmq';
 import { InjectQueue }           from '@nestjs/bullmq';
 import { Redis }                 from 'ioredis';
-<<<<<<< HEAD
 import { InjectRedis }           from '../common/redis/inject-redis';
-=======
-import { InjectRedis }           from '@liaoliaots/nestjs-redis';
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
 import { eq, and, lte, sql }    from 'drizzle-orm';
 
 import { DB_TOKEN }               from '../common/database/database.module';

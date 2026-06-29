@@ -13,11 +13,7 @@ import {
   RedisHealthGuard,
   RedisHealthState,
 } from '../../common/redis/redis-health.guard';
-<<<<<<< HEAD
 import { getRedisToken }            from '../../common/redis/inject-redis';
-=======
-import { getRedisToken }            from '@liaoliaots/nestjs-redis';
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
 
 function makeCtx(path: string): ExecutionContext {
   return {

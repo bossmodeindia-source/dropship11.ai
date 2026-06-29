@@ -83,7 +83,6 @@ Updated Semgrep exclude globs from repository-root-specific patterns to recursiv
 - Medium Kubernetes findings are either remediated or precisely justified.
 - Security workflows continue to run real scanners and fail on high/critical findings.
 
-<<<<<<< HEAD
 ## Enterprise OSV lockfile remediation addendum
 
 The Enterprise Certification OSV scan later reported 9 backend lockfile findings across 7 packages:
@@ -133,8 +132,6 @@ Post-remediation verification:
 
 Local note: the Windows OSV binary download timed out and produced a corrupt executable, so the exact OSV CLI was not recorded as locally passing on this workstation. The CI workflow still installs the official Linux x64 OSV Scanner binary, and the backend lockfile no longer contains installed vulnerable package instances matching the Enterprise OSV report.
 
-=======
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
 ## Files Created or Modified
 
 - `.github/workflows/certification.yml`
@@ -144,12 +141,9 @@ Local note: the Windows OSV binary download timed out and produced a corrupt exe
 - `frontend/package.json`
 - `frontend/package-lock.json`
 - `frontend/tsconfig.json`
-<<<<<<< HEAD
 - `package.json`
 - `package-lock.json`
 - `src/common/redis/redis.constants.ts`
 - `src/common/redis/inject-redis.ts`
 - Redis consumer imports updated from package `InjectRedis` to the local compatibility shim
-=======
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
 - `FINAL_CI_REMEDIATION_REPORT.md`

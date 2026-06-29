@@ -25,11 +25,7 @@ import {
 } from '@nestjs/common';
 import { Reflector }  from '@nestjs/core';
 import { Redis }      from 'ioredis';
-<<<<<<< HEAD
 import { InjectRedis } from './inject-redis';
-=======
-import { InjectRedis } from '@liaoliaots/nestjs-redis';
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
 
 export const REQUIRES_REDIS = 'requires_redis';
 

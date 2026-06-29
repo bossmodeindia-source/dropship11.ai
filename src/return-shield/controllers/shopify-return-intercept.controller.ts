@@ -39,11 +39,7 @@ import {
 import { ApiTags, ApiOperation }        from '@nestjs/swagger';
 import { createHmac, timingSafeEqual }  from 'crypto';
 import { ConfigService }                from '@nestjs/config';
-<<<<<<< HEAD
 import { InjectRedis }                  from '../../common/redis/inject-redis';
-=======
-import { InjectRedis }                  from '@liaoliaots/nestjs-redis';
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
 import { Redis }                        from 'ioredis';
 
 import { DB_TOKEN, DrizzleDB }          from '../../common/database/database.module';

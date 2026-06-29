@@ -27,14 +27,9 @@ import { ConfigService }     from '@nestjs/config';
 import { RedisModule as LLRedisModule } from '@liaoliaots/nestjs-redis';
 import Redis, { RedisOptions } from 'ioredis';
 import { DistributedLockService } from './distributed-lock.service';
-<<<<<<< HEAD
 import { REDIS_CLIENT } from './redis.constants';
 
 export { REDIS_CLIENT } from './redis.constants';
-=======
-
-export const REDIS_CLIENT = 'REDIS_CLIENT';
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
 
 function buildRedisOptions(config: ConfigService): RedisOptions & { url?: string } {
   const url = config.get<string>('REDIS_URL');

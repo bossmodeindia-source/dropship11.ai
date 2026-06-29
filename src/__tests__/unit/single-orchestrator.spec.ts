@@ -11,11 +11,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { UnifiedCommerceOrchestrator } from '../../orchestrator/unified-commerce-orchestrator.service';
-<<<<<<< HEAD
 import { getRedisToken }               from '../../common/redis/inject-redis';
-=======
-import { getRedisToken }               from '@liaoliaots/nestjs-redis';
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
 import { ConfigService }               from '@nestjs/config';
 import { DB_TOKEN }                    from '../../common/database/database.module';
 

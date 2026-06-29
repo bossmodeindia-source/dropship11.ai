@@ -4,11 +4,7 @@
 
 import { Test, TestingModule }     from '@nestjs/testing';
 import { QueueIdempotencyService } from '../../common/queue/queue-idempotency.service';
-<<<<<<< HEAD
 import { getRedisToken }           from '../../common/redis/inject-redis';
-=======
-import { getRedisToken }           from '@liaoliaots/nestjs-redis';
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
 
 describe('QueueIdempotencyService', () => {
   let service: QueueIdempotencyService;

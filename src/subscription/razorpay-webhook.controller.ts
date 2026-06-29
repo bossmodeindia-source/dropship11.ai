@@ -24,11 +24,7 @@ import { Request }               from 'express';
 import { Public }                from '../common/decorators/public.decorator';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { Redis }                 from 'ioredis';
-<<<<<<< HEAD
 import { InjectRedis }           from '../common/redis/inject-redis';
-=======
-import { InjectRedis }           from '@liaoliaots/nestjs-redis';
->>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
 import { ConfigService }           from '@nestjs/config';
 import { WebhookIdempotencyService } from '../common/webhook/webhook-idempotency.service';
 import { SubscriptionService }   from '../subscription/subscription.service';
