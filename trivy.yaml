@@ -1,0 +1,23 @@
+include-dev-deps: true
+severity:
+  - HIGH
+  - CRITICAL
+exit-code: 1
+ignore-unfixed: false
+scanners:
+  - vuln
+  - secret
+  - misconfig
+skip-dirs:
+  - node_modules
+  - frontend/node_modules
+  - dist
+  - coverage
+  - playwright-report
+  - test-results
+skip-files:
+  - phase9-npm-audit-before.json
+  - phase9-npm-audit-after-fix.json
+  - phase9-npm-audit-remediated.json
+  - phase9-trivy-dependencies.json
+  - phase9-trivy-filesystem.json

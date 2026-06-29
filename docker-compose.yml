@@ -1,0 +1,155 @@
+version: '3.9'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AI Empire V65 — Local Development Stack
+#
+# Usage:
+#   docker compose up -d                    # start infra (db, redis, jaeger, otel)
+#   docker compose --profile full up -d    # start everything including API + worker
+#   docker compose logs -f api             # tail API logs
+#   docker compose down -v                 # stop and remove volumes
+#
+# Observability (V65):
+#   Jaeger UI:  http://localhost:16686
+#   Prometheus: http://localhost:9090
+#   OTEL gRPC:  localhost:4317
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: aiempire_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       aiempire
+      POSTGRES_USER:     aiempire
+      POSTGRES_PASSWORD: localpassword
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U aiempire']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: aiempire_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - '6379:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Jaeger (V65: distributed tracing UI) ─────────────────────────────────────
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: aiempire_jaeger
+    restart: unless-stopped
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - '16686:16686'   # Jaeger UI
+      - '14250:14250'   # gRPC collector
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:16686 || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── OTEL Collector (V65: receives traces from app, exports to Jaeger) ─────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: aiempire_otel
+    restart: unless-stopped
+    command: ['--config=/etc/otel-collector-config.yaml']
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - '4317:4317'   # OTLP gRPC
+      - '4318:4318'   # OTLP HTTP
+      - '8889:8889'   # Prometheus metrics exported by OTEL
+    depends_on:
+      jaeger:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:13133 || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── API (optional — run locally for faster dev cycles) ───────────────────────
+  api:
+    build:
+      context: .
+      target: runner
+    container_name: aiempire_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      NODE_ENV:                      development
+      DATABASE_URL:                  postgresql://aiempire:localpassword@db:5432/aiempire
+      REDIS_URL:                     redis://redis:6379
+      PORT:                          3000
+      OTEL_EXPORTER_OTLP_ENDPOINT:  http://otel-collector:4317
+      OTEL_SERVICE_NAME:             aiempire-api
+      OTEL_SAMPLING_RATIO:           '0.1'
+      OTEL_DISABLED:                 'false'
+    ports:
+      - '3000:3000'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/health || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    profiles:
+      - full  # only start with: docker compose --profile full up
+
+  # ── Worker (optional) ────────────────────────────────────────────────────────
+  worker:
+    build:
+      context: .
+      target: runner
+    container_name: aiempire_worker
+    restart: unless-stopped
+    command: ['node', 'dist/src/worker.js']
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      otel-collector:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      NODE_ENV:                      development
+      DATABASE_URL:                  postgresql://aiempire:localpassword@db:5432/aiempire
+      REDIS_URL:                     redis://redis:6379
+      OTEL_EXPORTER_OTLP_ENDPOINT:  http://otel-collector:4317
+      OTEL_SERVICE_NAME:             aiempire-worker
+      OTEL_SAMPLING_RATIO:           '0.1'
+      OTEL_DISABLED:                 'false'
+    profiles:
+      - full  # only start with: docker compose --profile full up
+
+volumes:
+  pgdata:
+  redisdata:

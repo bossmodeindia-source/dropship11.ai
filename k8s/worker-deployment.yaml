@@ -1,0 +1,153 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aiempire-worker
+  namespace: aiempire
+  labels:
+    app: aiempire-worker
+    version: v62
+    app.kubernetes.io/name: aiempire-worker
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: aiempire-worker
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: aiempire-worker
+        version: v62
+      annotations:
+        prometheus.io/scrape: "false"
+    spec:
+      terminationGracePeriodSeconds: 120   # workers need longer drain for jobs
+      serviceAccountName: aiempire-worker-sa
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: [aiempire-worker]
+                topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: worker
+          #trivy:ignore:KSV0125 AI Empire production image is pulled from the private GitHub Container Registry org namespace.
+          image: ghcr.io/bossmodeindia-source/aiempire-nestjs:v69
+          imagePullPolicy: Always
+          command: ["node", "dist/src/worker.js"]
+
+          envFrom:
+            - configMapRef:
+                name: aiempire-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: REDIS_URL
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: JWT_SECRET
+            - name: JWT_REFRESH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: JWT_REFRESH_SECRET
+            - name: ENCRYPTION_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: ENCRYPTION_MASTER_KEY
+            - name: WEBHOOK_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: WEBHOOK_HMAC_SECRET
+            - name: RAZORPAY_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: RAZORPAY_KEY_ID
+            - name: RAZORPAY_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: RAZORPAY_KEY_SECRET
+            - name: META_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: META_ACCESS_TOKEN
+            - name: SHOPIFY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: SHOPIFY_API_KEY
+            - name: SHOPIFY_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: SHOPIFY_API_SECRET
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: TELEGRAM_BOT_TOKEN
+            - name: INTERNAL_SERVICE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: INTERNAL_SERVICE_KEY
+
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"       # workers need more for FFmpeg + AI tasks
+
+          livenessProbe:
+            exec:
+              command: ["node", "-e", "process.exit(0)"]
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            failureThreshold: 3
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,52 @@
+name: OpenAPI Contract Certification
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-contract-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-contract:
+    name: Generate and validate API contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CI: true
+      NODE_ENV: test
+      OTEL_SDK_DISABLED: true
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build certified backend
+        run: npm run build
+
+      - name: Generate and validate OpenAPI schema
+        run: npm run openapi:generate
+
+      - name: Run API contract suite
+        run: npm run test:contract
+
+      - name: Upload generated OpenAPI contract
+        uses: actions/upload-artifact@v4
+        with:
+          name: aiempire-openapi-contract
+          path: openapi/openapi.json
+          if-no-files-found: error

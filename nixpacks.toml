@@ -1,0 +1,19 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# nixpacks.toml — Railway build configuration
+#
+# NestJS with sourceRoot="src" outputs to dist/src/main.js
+# ─────────────────────────────────────────────────────────────────────────────
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "python3", "gnumake", "gcc", "ffmpeg"]
+
+[phases.install]
+cmds = ["npm ci --frozen-lockfile"]
+cacheDirectories = ["node_modules"]
+
+[phases.build]
+cmds = ["npm run build"]
+cacheDirectories = [".tsbuildinfo"]
+
+[start]
+cmd = "node dist/src/main.js"

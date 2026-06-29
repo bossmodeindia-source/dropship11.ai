@@ -1,0 +1,22 @@
+# ── AI Empire V64 — Railway API Service ─────────────────────────────────────
+#
+# Deploy backend to Railway. Frontend goes to Vercel (separate repo).
+# Worker service uses railway.worker.toml (set via Railway dashboard).
+#
+# NestJS with sourceRoot="src" outputs to dist/src/main.js (not dist/main.js)
+# ─────────────────────────────────────────────────────────────────────────────
+
+[build]
+builder      = "NIXPACKS"
+buildCommand = "npm ci --frozen-lockfile && npm run build"
+
+[deploy]
+# releaseCommand runs AFTER build and BEFORE startCommand on every deploy.
+# Uses DATABASE_URL_DIRECT (session mode, bypasses pgbouncer DDL restrictions).
+# Falls back to DATABASE_URL if DIRECT is not set.
+releaseCommand          = "node dist/scripts/migrate.js"
+startCommand            = "node dist/src/main.js"
+healthcheckPath         = "/health"
+healthcheckTimeout      = 30
+restartPolicyType       = "ON_FAILURE"
+restartPolicyMaxRetries = 3

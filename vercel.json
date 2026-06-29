@@ -1,0 +1,18 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+
+  "comment": "Root-level vercel.json — security headers only. API rewrites are in frontend/vercel.json and frontend/next.config.ts. The NestJS backend MUST NOT be deployed to Vercel — use Railway (railway.toml).",
+
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Frame-Options",         "value": "DENY" },
+        { "key": "X-Content-Type-Options",   "value": "nosniff" },
+        { "key": "Referrer-Policy",          "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy",       "value": "camera=(), microphone=(), geolocation=()" }
+      ]
+    }
+  ]
+}

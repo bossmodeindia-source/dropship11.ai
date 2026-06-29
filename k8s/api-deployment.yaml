@@ -1,0 +1,205 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aiempire-api
+  namespace: aiempire
+  labels:
+    app: aiempire-api
+    version: v62
+    app.kubernetes.io/name: aiempire-api
+    app.kubernetes.io/component: api
+spec:
+  replicas: 3
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: aiempire-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0          # zero-downtime rolling deploys
+  template:
+    metadata:
+      labels:
+        app: aiempire-api
+        version: v62
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      terminationGracePeriodSeconds: 35   # > 30s drain in main.ts
+      serviceAccountName: aiempire-api-sa
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      # ── Anti-affinity: spread across nodes ──────────────────────────────────
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: [aiempire-api]
+                topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: api
+          #trivy:ignore:KSV0125 AI Empire production image is pulled from the private GitHub Container Registry org namespace.
+          image: ghcr.io/bossmodeindia-source/aiempire-nestjs:v69
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+
+          # ── Environment: ConfigMap + Secret refs (NO plaintext) ─────────────
+          envFrom:
+            - configMapRef:
+                name: aiempire-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: REDIS_URL
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: JWT_SECRET
+            - name: JWT_REFRESH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: JWT_REFRESH_SECRET
+            - name: ENCRYPTION_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: ENCRYPTION_MASTER_KEY
+            - name: WEBHOOK_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: WEBHOOK_HMAC_SECRET
+            - name: RAZORPAY_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: RAZORPAY_KEY_ID
+            - name: RAZORPAY_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: RAZORPAY_KEY_SECRET
+            - name: META_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: META_ACCESS_TOKEN
+            - name: SHOPIFY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: SHOPIFY_API_KEY
+            - name: SHOPIFY_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: SHOPIFY_API_SECRET
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: TELEGRAM_BOT_TOKEN
+            - name: INTERNAL_SERVICE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: INTERNAL_SERVICE_KEY
+
+          # ── Resource requests/limits ─────────────────────────────────────────
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+          # ── Probes ───────────────────────────────────────────────────────────
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 12       # 60s total startup window
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 0
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # ── Lifecycle: pre-stop drain ─────────────────────────────────────────
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]   # allow load balancer to drain
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      # ── Init: wait for DB ─────────────────────────────────────────────────────
+      initContainers:
+        - name: wait-for-db
+          image: postgres:16-alpine
+          command: ['sh', '-c', 'until pg_isready -h $(echo $DATABASE_URL | sed "s/.*@//" | cut -d/ -f1 | cut -d: -f1) -p 5432; do echo waiting; sleep 2; done']
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: DATABASE_URL
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir: {}

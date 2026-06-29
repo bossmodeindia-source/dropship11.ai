@@ -1,0 +1,599 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# AI Empire — Observability Stack
+# Prometheus + Grafana + Loki (lightweight self-hosted)
+# Deploy with: kubectl apply -f k8s/observability.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Prometheus ConfigMap ─────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: aiempire
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval:     15s
+      evaluation_interval: 15s
+      external_labels:
+        cluster: aiempire-prod
+        environment: production
+
+    rule_files:
+      - "/etc/prometheus/rules/*.yml"
+
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: []
+
+    scrape_configs:
+      # ── AI Empire API ───────────────────────────────────────────────────────
+      - job_name: aiempire-api
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [aiempire]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: app
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+
+      # ── Node Exporter ────────────────────────────────────────────────────────
+      - job_name: node-exporter
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            regex: (.+)
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/${1}/proxy/metrics
+
+  rules.yml: |
+    groups:
+      - name: aiempire-alerts
+        rules:
+          - alert: HighErrorRate
+            expr: rate(aiempire_http_errors_total[5m]) > 0.05
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "High error rate on {{ $labels.app }}"
+              description: "Error rate > 5% for 5 minutes"
+
+          - alert: APILatencyHigh
+            expr: histogram_quantile(0.95, rate(aiempire_http_request_duration_seconds_bucket[5m])) > 2
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "p95 latency > 2s on {{ $labels.app }}"
+
+          - alert: PodCrashLooping
+            expr: rate(kube_pod_container_status_restarts_total{namespace="aiempire"}[15m]) > 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Pod {{ $labels.pod }} crash-looping"
+
+          - alert: QueueBacklog
+            expr: bullmq_waiting_jobs > 1000
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "BullMQ queue backlog > 1000 jobs"
+
+          - alert: EscrowUnprocessed
+            expr: aiempire_escrow_unprocessed_orders > 50
+            for: 15m
+            labels:
+              severity: critical
+            annotations:
+              summary: "{{ $value }} escrow orders unprocessed for >15 minutes"
+
+          - alert: DatabaseConnections
+            expr: aiempire_db_pool_waiting > 10
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "DB connection pool exhausted"
+
+          - alert: MemoryPressure
+            expr: container_memory_usage_bytes{namespace="aiempire"} / container_spec_memory_limit_bytes{namespace="aiempire"} > 0.85
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Container memory > 85% of limit"
+---
+# ── Prometheus Deployment ────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: aiempire
+  labels:
+    app: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      serviceAccountName: prometheus-sa
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: prometheus
+          #trivy:ignore:KSV0125 Official Prometheus image pinned to an immutable upstream version for observability only.
+          image: prom/prometheus:v2.51.0
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--storage.tsdb.retention.time=15d"
+            - "--web.enable-lifecycle"
+            - "--web.enable-admin-api"
+          ports:
+            - containerPort: 9090
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "2Gi"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: storage
+              mountPath: /prometheus
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        - name: storage
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus-sa
+  namespace: aiempire
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus-role
+rules:
+  - apiGroups: [""]
+    resources: [nodes, nodes/metrics, services, endpoints, pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get]
+  - nonResourceURLs: [/metrics, /metrics/cadvisor]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus-role
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-sa
+    namespace: aiempire
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: aiempire
+  labels:
+    app: prometheus
+spec:
+  type: ClusterIP
+  selector:
+    app: prometheus
+  ports:
+    - port: 9090
+      targetPort: 9090
+---
+# ── Grafana ConfigMap ────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: aiempire
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus:9090
+        access: proxy
+        isDefault: true
+        jsonData:
+          timeInterval: "15s"
+      - name: Loki
+        type: loki
+        url: http://loki:3100
+        access: proxy
+        jsonData:
+          maxLines: 1000
+---
+# ── Grafana Deployment ───────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: aiempire
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: grafana
+          #trivy:ignore:KSV0125 Official Grafana image pinned to an immutable upstream version for observability only.
+          image: grafana/grafana:10.4.0
+          ports:
+            - containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aiempire-secrets
+                  key: GRAFANA_ADMIN_PASSWORD
+                  optional: true
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+            - name: GF_SERVER_ROOT_URL
+              value: "https://grafana.aiempirebot.com"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: storage
+              mountPath: /var/lib/grafana
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: storage
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: aiempire
+spec:
+  type: ClusterIP
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000
+---
+# ── Loki (log aggregation) ───────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+  namespace: aiempire
+data:
+  loki.yaml: |
+    auth_enabled: false
+    server:
+      http_listen_port: 3100
+    ingester:
+      lifecycler:
+        address: 127.0.0.1
+        ring:
+          kvstore:
+            store: inmemory
+          replication_factor: 1
+        final_sleep: 0s
+      chunk_idle_period: 5m
+      chunk_retain_period: 30s
+    schema_config:
+      configs:
+        - from: 2024-01-01
+          store: boltdb
+          object_store: filesystem
+          schema: v11
+          index:
+            prefix: index_
+            period: 168h
+    storage_config:
+      boltdb:
+        directory: /loki/index
+      filesystem:
+        directory: /loki/chunks
+    limits_config:
+      enforce_metric_name: false
+      reject_old_samples: true
+      reject_old_samples_max_age: 168h
+    chunk_store_config:
+      max_look_back_period: 0s
+    table_manager:
+      retention_deletes_enabled: true
+      retention_period: 336h    # 14d retention
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+  namespace: aiempire
+  labels:
+    app: loki
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loki
+  template:
+    metadata:
+      labels:
+        app: loki
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: loki
+          #trivy:ignore:KSV0125 Official Grafana Loki image pinned to an immutable upstream version for observability only.
+          image: grafana/loki:2.9.6
+          args: ["-config.file=/etc/loki/loki.yaml"]
+          ports:
+            - containerPort: 3100
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki
+            - name: storage
+              mountPath: /loki
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: config
+          configMap:
+            name: loki-config
+        - name: storage
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: aiempire
+spec:
+  type: ClusterIP
+  selector:
+    app: loki
+  ports:
+    - port: 3100
+      targetPort: 3100
+---
+# ── Promtail (log shipper: pod logs → Loki) ───────────────────────────────────
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: promtail
+  namespace: aiempire
+  labels:
+    app: promtail
+spec:
+  selector:
+    matchLabels:
+      app: promtail
+  template:
+    metadata:
+      labels:
+        app: promtail
+    spec:
+      serviceAccountName: promtail-sa
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: promtail
+          #trivy:ignore:KSV0125 Official Grafana Promtail image pinned to an immutable upstream version for observability only.
+          image: grafana/promtail:2.9.6
+          args: ["-config.file=/etc/promtail/config.yml"]
+          env:
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: config
+              mountPath: /etc/promtail
+            - name: varlog
+              mountPath: /var/log
+              readOnly: true
+            - name: varlibdockercontainers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: config
+          configMap:
+            name: promtail-config
+        - name: varlog
+          #trivy:ignore:KSV0023 Promtail requires read-only hostPath access to Kubernetes node log files for cluster log collection.
+          hostPath:
+            path: /var/log
+        - name: varlibdockercontainers
+          #trivy:ignore:KSV0023 Promtail requires read-only hostPath access to container log files for Docker-based node log collection.
+          hostPath:
+            path: /var/lib/docker/containers
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promtail-config
+  namespace: aiempire
+data:
+  config.yml: |
+    server:
+      http_listen_port: 9080
+    positions:
+      filename: /tmp/positions.yaml
+    clients:
+      - url: http://loki:3100/loki/api/v1/push
+    scrape_configs:
+      - job_name: kubernetes-pods
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_namespace]
+            action: keep
+            regex: aiempire
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: app
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - replacement: /var/log/pods/*$1/*.log
+            separator: /
+            source_labels: [__meta_kubernetes_pod_uid, __meta_kubernetes_pod_container_name]
+            target_label: __path__
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: promtail-sa
+  namespace: aiempire
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: promtail-role
+rules:
+  - apiGroups: [""]
+    resources: [nodes, services, pods]
+    verbs: [get, watch, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: promtail-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: promtail-role
+subjects:
+  - kind: ServiceAccount
+    name: promtail-sa
+    namespace: aiempire

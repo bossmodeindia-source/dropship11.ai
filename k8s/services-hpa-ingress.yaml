@@ -1,0 +1,182 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# AI Empire — K8s Services
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: aiempire-api
+  namespace: aiempire
+  labels:
+    app: aiempire-api
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "3000"
+spec:
+  type: ClusterIP
+  selector:
+    app: aiempire-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+      protocol: TCP
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Horizontal Pod Autoscaler — API
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: aiempire-api-hpa
+  namespace: aiempire
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: aiempire-api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 75
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 3
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300   # 5min cooldown before scale-down
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Horizontal Pod Autoscaler — Worker
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: aiempire-worker-hpa
+  namespace: aiempire
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: aiempire-worker
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Ingress (nginx-ingress-controller)
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aiempire-ingress
+  namespace: aiempire
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "10"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+    # TLS via cert-manager (Let's Encrypt)
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Rate limiting at ingress level
+    nginx.ingress.kubernetes.io/limit-rps: "50"
+    nginx.ingress.kubernetes.io/limit-connections: "20"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.aiempirebot.com
+      secretName: aiempire-tls
+  rules:
+    - host: api.aiempirebot.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aiempire-api
+                port:
+                  number: 80
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# PodDisruptionBudget — ensure availability during cluster operations
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: aiempire-api-pdb
+  namespace: aiempire
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: aiempire-api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: aiempire-worker-pdb
+  namespace: aiempire
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: aiempire-worker
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# ServiceAccounts
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aiempire-api-sa
+  namespace: aiempire
+  labels:
+    app: aiempire-api
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aiempire-worker-sa
+  namespace: aiempire
+  labels:
+    app: aiempire-worker
+automountServiceAccountToken: false

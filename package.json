@@ -1,0 +1,252 @@
+{
+  "name": "aiempire-nestjs-app",
+  "version": "69.0.0",
+  "description": "AI Empire — V69 Enterprise Architecture Certified | Single Orchestrator | Drizzle-Only | Zero Legacy Debt",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "nest build && tsc --outDir dist/scripts --skipLibCheck --esModuleInterop --module commonjs --target ES2021 scripts/migrate.ts",
+    "start": "node dist/src/main.js",
+    "start:prod": "node dist/src/main.js",
+    "start:worker": "node dist/src/worker.js",
+    "start:dev": "nest start --watch",
+    "start:debug": "nest start --debug --watch",
+    "lint": "eslint \"src/**/*.ts\" \"scripts/**/*.ts\"",
+    "lint:check": "eslint \"src/**/*.ts\" \"scripts/**/*.ts\"",
+    "lint:fix": "npm run lint -- --fix",
+    "format": "prettier --write eslint.config.mjs .prettierrc.json semgrep.yml trivy.yaml .github/**/*.yml package.json PHASE9_SECURITY_REPORT.md PHASE10_CONTRACT_REPORT.md OPENAPI_CONTRACT_CERTIFICATION.md PLAYWRIGHT_CERTIFICATION_REPORT.md SECURITY_CI_CERTIFICATION_REPORT.md",
+    "format:check": "prettier --check eslint.config.mjs .prettierrc.json semgrep.yml trivy.yaml .github/**/*.yml package.json PHASE9_SECURITY_REPORT.md PHASE10_CONTRACT_REPORT.md OPENAPI_CONTRACT_CERTIFICATION.md PLAYWRIGHT_CERTIFICATION_REPORT.md SECURITY_CI_CERTIFICATION_REPORT.md",
+    "security:audit": "npm audit --audit-level=high",
+    "security:audit-npm": "npm audit --audit-level=high",
+    "security:audit-ci": "audit-ci --high",
+    "security:semgrep": "semgrep scan --config semgrep.yml --error --metrics=off",
+    "security:osv": "osv-scanner --lockfile=package-lock.json --lockfile=frontend/package-lock.json",
+    "security:trivy:fs": "trivy fs --config trivy.yaml .",
+    "security:trivy:validate-misconfig": "node scripts/validate-trivy-misconfig.js",
+    "security:trivy:docker": "trivy image --config trivy.yaml aiempire-backend:ci",
+    "docker:build": "docker build -t aiempire-backend:ci .",
+    "certification:final": "node scripts/final-certification.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:cov": "jest --coverage",
+    "test:coverage:final": "jest --coverage",
+    "test:integration:coverage": "jest src/__tests__/integration --coverage",
+    "test:e2e": "jest src/__tests__/e2e --coverage",
+    "test:security": "npx ts-node ../tests/security/v60-pentest.ts",
+    "test:load": "k6 run ../tests/load/v60-load-tests.js",
+    "db:seed": "ts-node -r tsconfig-paths/register src/database/seed.ts",
+    "db:migrate": "drizzle-kit push:pg",
+    "db:migrate:sql": "ts-node -r tsconfig-paths/register scripts/migrate.ts",
+    "health:check": "curl -f http://localhost:3000/health",
+    "v60:verify:guards": "grep -r 'from.*auth/guards' src/ --include='*.ts' | wc -l",
+    "v60:verify:finance": "grep -r 'ProfitService\\|ProfitEngine' src/ --include='*.ts' | wc -l",
+    "v60:verify:orchestrator": "grep -r 'BotOrchestratorService\\|AutonomousLoopService' src/ --include='*.ts' | wc -l",
+    "db:migrate:prod": "node dist/scripts/migrate.js",
+    "migrate:v64": "node src/database/migrations/run-v64-migrations.js",
+    "postbuild": "node -e \"const fs=require('fs'); if(!fs.existsSync('dist/migrations')) fs.cpSync('migrations', 'dist/migrations', {recursive:true});\"",
+    "migrate:v65": "node src/database/migrations/run-v65-migrations.js",
+    "certify": "node src/certification/production-gate.js",
+    "certify:strict": "node src/certification/production-gate.js",
+    "migrate:v66": "node src/database/migrations/run-v66-migrations.js",
+    "prebuild": "ts-node -r tsconfig-paths/register src/certification/arch-guard.ts && node src/certification/production-gate.js",
+    "migrate:v67": "node src/database/migrations/run-v67-migrations.js",
+    "migrate:all": "node src/database/migrations/run-v66-migrations.js && node src/database/migrations/run-v67-migrations.js",
+    "test:unit": "jest src/__tests__/unit --coverage",
+    "test:all": "jest src/__tests__ --coverage",
+    "validate:architecture": "ts-node -r tsconfig-paths/register src/certification/arch-guard.ts",
+    "test:arch": "jest src/__tests__/unit/arch-guard.spec.ts --testPathPattern=arch",
+    "openapi:generate": "jest src/__tests__/contract/openapi-generate.contract.spec.ts --runInBand",
+    "test:contract": "jest src/__tests__/contract --runInBand --detectOpenHandles",
+    "test:playwright": "playwright test"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.540.0",
+    "@aws-sdk/s3-request-presigner": "^3.540.0",
+<<<<<<< HEAD
+    "@liaoliaots/nestjs-redis": "^10.0.0",
+    "@nestjs/bullmq": "^11.0.4",
+    "@nestjs/common": "11.1.18",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "11.1.18",
+    "@nestjs/jwt": "^11.0.2",
+    "@nestjs/passport": "^11.0.5",
+    "@nestjs/platform-express": "11.1.18",
+    "@nestjs/platform-socket.io": "11.1.18",
+    "@nestjs/schedule": "^6.1.3",
+    "@nestjs/swagger": "^11.4.4",
+    "@nestjs/terminus": "^11.1.1",
+    "@nestjs/throttler": "^6.5.0",
+    "@nestjs/websockets": "11.1.18",
+=======
+    "@liaoliaots/nestjs-redis": "^9.0.5",
+    "@nestjs/bullmq": "^10.2.0",
+    "@nestjs/common": "^10.3.0",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "^10.3.0",
+    "@nestjs/jwt": "^10.2.0",
+    "@nestjs/passport": "^10.0.3",
+    "@nestjs/platform-express": "^10.3.0",
+    "@nestjs/platform-socket.io": "^10.3.0",
+    "@nestjs/schedule": "^4.0.1",
+    "@nestjs/swagger": "^7.3.0",
+    "@nestjs/terminus": "^10.2.3",
+    "@nestjs/throttler": "^5.1.2",
+    "@nestjs/websockets": "^10.3.0",
+>>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.77.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.219.0",
+    "@opentelemetry/resources": "^2.8.0",
+    "@opentelemetry/sdk-node": "^0.219.0",
+    "@opentelemetry/sdk-trace-base": "^2.8.0",
+    "@opentelemetry/semantic-conventions": "^1.30.0",
+    "@sendgrid/mail": "^8.1.3",
+    "@types/compression": "^1.7.5",
+    "@types/multer": "^2.1.0",
+    "@types/supertest": "^7.2.0",
+    "argon2": "^0.44.0",
+    "axios": "^1.6.8",
+    "axios-retry": "^4.5.0",
+    "bcryptjs": "^2.4.3",
+    "bullmq": "^5.4.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "compression": "^1.7.4",
+    "drizzle-orm": "^0.45.2",
+    "form-data": "^4.0.0",
+    "helmet": "^7.1.0",
+    "input": "^1.0.1",
+    "ioredis": "^5.3.2",
+    "joi": "^18.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.2.0",
+    "opossum": "^8.1.3",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "passport-local": "^1.0.0",
+    "pg": "^8.11.3",
+    "pino": "^8.19.0",
+    "pino-pretty": "^11.0.0",
+    "prom-client": "^15.1.2",
+    "razorpay": "^2.9.2",
+    "reflect-metadata": "^0.2.1",
+    "rxjs": "^7.8.1",
+    "socket.io": "^4.7.4",
+    "supertest": "^7.2.2",
+    "telegram": "^2.19.8",
+<<<<<<< HEAD
+    "uuid": "^11.1.1"
+=======
+    "uuid": "^9.0.1"
+>>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
+  },
+  "devDependencies": {
+    "@apidevtools/swagger-parser": "^12.1.0",
+    "@eslint/js": "^9.39.4",
+    "@nestjs/cli": "^11.0.23",
+    "@nestjs/schematics": "^11.1.0",
+<<<<<<< HEAD
+    "@nestjs/testing": "11.1.18",
+=======
+    "@nestjs/testing": "^10.3.0",
+>>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
+    "@playwright/test": "^1.61.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/express": "^4.17.21",
+    "@types/form-data": "^2.5.0",
+    "@types/jest": "^29.5.12",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/multer": "^1.4.11",
+    "@types/node": "^20.12.2",
+    "@types/opossum": "^8.1.4",
+    "@types/passport-jwt": "^4.0.1",
+    "@types/passport-local": "^1.0.38",
+    "@types/pg": "^8.11.4",
+    "@types/uuid": "^9.0.8",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "audit-ci": "^7.1.0",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-security": "^4.0.1",
+    "globals": "^17.6.0",
+    "jest": "^29.7.0",
+    "nock": "^14.0.15",
+    "prettier": "^3.8.4",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.4.3",
+    "typescript-eslint": "^8.61.1"
+  },
+  "overrides": {
+<<<<<<< HEAD
+    "@nestjs/common": "11.1.18",
+    "@nestjs/core": "11.1.18",
+    "esbuild": "^0.25.12",
+    "file-type": "^21.3.4",
+    "glob": "10.5.0",
+    "js-yaml": "^4.2.0",
+    "lodash": "4.18.1",
+    "multer": "$multer",
+    "qs": "6.15.2",
+    "uuid": "^11.1.1"
+=======
+    "express": "4.22.2",
+    "glob": "10.5.0",
+    "lodash": "4.18.1",
+    "multer": "$multer",
+    "qs": "6.15.2"
+>>>>>>> a1b8c0c1cff445126259345924e07d81a359e9bd
+  },
+  "jest": {
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "collectCoverageFrom": [
+      "**/*.(t|j)s"
+    ],
+    "coverageDirectory": "../coverage",
+    "testEnvironment": "node",
+    "testTimeout": 30000,
+    "setupFiles": [
+      "<rootDir>/test-utils/jest-infrastructure.setup.ts"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "branches": 80,
+        "functions": 80,
+        "lines": 80,
+        "statements": 80
+      },
+      "./src/escrow/": {
+        "lines": 95
+      },
+      "./src/commission/": {
+        "lines": 95
+      },
+      "./src/orders/": {
+        "lines": 90
+      },
+      "./src/finance/": {
+        "lines": 90
+      },
+      "./src/auth/": {
+        "lines": 85
+      }
+    },
+    "coveragePathIgnorePatterns": [
+      "/node_modules/",
+      "/dist/",
+      ".*\\.spec\\.ts$"
+    ]
+  }
+}

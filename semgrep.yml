@@ -1,0 +1,49 @@
+rules:
+  - id: aiempire-no-eval
+    message: Dynamic code execution is not allowed in certified backend code.
+    severity: ERROR
+    languages:
+      - typescript
+      - javascript
+    paths:
+      include:
+        - src
+        - scripts
+      exclude:
+        - '**/src/**/*.spec.ts'
+        - '**/src/**/__tests__/**'
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
+
+  - id: aiempire-no-implied-eval-timers
+    message: String-based timers are equivalent to implied eval and are not allowed.
+    severity: ERROR
+    languages:
+      - typescript
+      - javascript
+    paths:
+      include:
+        - src
+        - scripts
+      exclude:
+        - '**/src/**/*.spec.ts'
+        - '**/src/**/__tests__/**'
+    pattern-either:
+      - pattern: setTimeout("...", ...)
+      - pattern: setInterval("...", ...)
+
+  - id: aiempire-no-hardcoded-private-key
+    message: Private keys must be loaded from secret storage, not committed in source.
+    severity: ERROR
+    languages:
+      - typescript
+      - javascript
+    paths:
+      include:
+        - src
+        - scripts
+      exclude:
+        - '**/src/**/*.spec.ts'
+        - '**/src/**/__tests__/**'
+    pattern-regex: '-----BEGIN (RSA |EC |OPENSSH |)PRIVATE KEY-----'

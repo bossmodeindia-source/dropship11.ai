@@ -1,0 +1,989 @@
+{
+  "SchemaVersion": 2,
+  "Trivy": {
+    "Version": "0.71.0"
+  },
+  "ReportID": "019f10e1-d987-7620-87a6-5cf285e6e465",
+  "CreatedAt": "2026-06-29T06:27:44.5834016+05:30",
+  "ArtifactName": "k8s",
+  "ArtifactType": "filesystem",
+  "Results": [
+    {
+      "Target": "api-deployment.yaml",
+      "Class": "config",
+      "Type": "kubernetes",
+      "MisconfSummary": {
+        "Successes": 54,
+        "Failures": 1
+      },
+      "Misconfigurations": [
+        {
+          "Type": "Kubernetes Security Check",
+          "ID": "KSV-0125",
+          "Title": "Restrict container images to trusted registries",
+          "Description": "Ensure that all containers use images only from trusted registry domains.",
+          "Message": "Container api in deployment aiempire-api (namespace: aiempire) uses an image from an untrusted registry.",
+          "Namespace": "builtin.kubernetes.KSV0125",
+          "Query": "data.builtin.kubernetes.KSV0125.deny",
+          "Resolution": "Use images from trusted registries.",
+          "Severity": "MEDIUM",
+          "PrimaryURL": "https://avd.aquasec.com/misconfig/ksv-0125",
+          "References": [
+            "https://cloud.google.com/container-registry/docs/overview#registries",
+            "https://docs.aws.amazon.com/general/latest/gr/ecr.html",
+            "https://avd.aquasec.com/misconfig/ksv-0125"
+          ],
+          "Status": "FAIL",
+          "CauseMetadata": {
+            "Provider": "Kubernetes",
+            "Service": "general",
+            "StartLine": 53,
+            "EndLine": 184,
+            "Code": {
+              "Lines": [
+                {
+                  "Number": 53,
+                  "Content": "        - name: api",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "        - \u001b[38;5;33mname\u001b[0m: api",
+                  "FirstCause": true,
+                  "LastCause": false
+                },
+                {
+                  "Number": 54,
+                  "Content": "          #trivy:ignore:KSV0125 AI Empire production image is pulled from the private GitHub Container Registry org namespace.",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "          \u001b[38;5;239m#trivy:ignore:KSV0125 AI Empire production image is pulled from the private GitHub Container Registry org namespace.",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 55,
+                  "Content": "          image: ghcr.io/bossmodeindia-source/aiempire-nestjs:v69",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[0m          \u001b[38;5;33mimage\u001b[0m: ghcr.io/bossmodeindia-source/aiempire-nestjs:v69",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 56,
+                  "Content": "          imagePullPolicy: Always",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "          \u001b[38;5;33mimagePullPolicy\u001b[0m: Always",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 57,
+                  "Content": "          ports:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "          \u001b[38;5;33mports\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 58,
+                  "Content": "            - name: http",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "            - \u001b[38;5;33mname\u001b[0m: http",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 59,
+                  "Content": "              containerPort: 3000",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "              \u001b[38;5;33mcontainerPort\u001b[0m: \u001b[38;5;37m3000",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 60,
+                  "Content": "              protocol: TCP",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[0m              \u001b[38;5;33mprotocol\u001b[0m: TCP",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 61,
+                  "Content": "",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "FirstCause": false,
+                  "LastCause": true
+                },
+                {
+                  "Number": 62,
+                  "Content": "",
+                  "IsCause": false,
+                  "Annotation": "",
+                  "Truncated": true,
+                  "FirstCause": false,
+                  "LastCause": false
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Target": "configmap.yaml",
+      "Class": "config",
+      "Type": "kubernetes",
+      "MisconfSummary": {
+        "Successes": 54,
+        "Failures": 1
+      },
+      "Misconfigurations": [
+        {
+          "Type": "Kubernetes Security Check",
+          "ID": "KSV-01010",
+          "Title": "ConfigMap with sensitive content",
+          "Description": "Storing sensitive content such as usernames and email addresses in configMaps is unsafe",
+          "Message": "ConfigMap 'aiempire-config' in 'aiempire' namespace stores sensitive contents in key(s) or value(s) '{\"PORT\", \"THROTTLE_LIMIT\"}'",
+          "Namespace": "builtin.kubernetes.KSV01010",
+          "Query": "data.builtin.kubernetes.KSV01010.deny",
+          "Resolution": "Remove sensitive content from configMap data value",
+          "Severity": "MEDIUM",
+          "PrimaryURL": "https://avd.aquasec.com/misconfig/ksv-01010",
+          "References": [
+            "https://avd.aquasec.com/misconfig/ksv-01010"
+          ],
+          "Status": "FAIL",
+          "CauseMetadata": {
+            "Provider": "Kubernetes",
+            "Service": "general"
+          }
+        }
+      ]
+    },
+    {
+      "Target": "namespace.yaml",
+      "Class": "config",
+      "Type": "kubernetes",
+      "MisconfSummary": {
+        "Successes": 55,
+        "Failures": 0
+      }
+    },
+    {
+      "Target": "observability.yaml",
+      "Class": "config",
+      "Type": "kubernetes",
+      "MisconfSummary": {
+        "Successes": 55,
+        "Failures": 5
+      },
+      "Misconfigurations": [
+        {
+          "Type": "Kubernetes Security Check",
+          "ID": "KSV-0023",
+          "Title": "hostPath volumes mounted",
+          "Description": "According to pod security standard 'HostPath Volumes', HostPath volumes must be forbidden.",
+          "Message": "DaemonSet 'promtail' should not set 'spec.template.volumes.hostPath'",
+          "Namespace": "builtin.kubernetes.KSV023",
+          "Query": "data.builtin.kubernetes.KSV023.deny",
+          "Resolution": "Do not set 'spec.volumes[*].hostPath'.",
+          "Severity": "MEDIUM",
+          "PrimaryURL": "https://avd.aquasec.com/misconfig/ksv-0023",
+          "References": [
+            "https://kubernetes.io/docs/concepts/security/pod-security-standards/#baseline",
+            "https://avd.aquasec.com/misconfig/ksv-0023"
+          ],
+          "Status": "FAIL",
+          "CauseMetadata": {
+            "Provider": "Kubernetes",
+            "Service": "general",
+            "StartLine": 462,
+            "EndLine": 527,
+            "Code": {
+              "Lines": [
+                {
+                  "Number": 462,
+                  "Content": "  ports:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "  \u001b[38;5;33mports\u001b[0m:",
+                  "FirstCause": true,
+                  "LastCause": false
+                },
+                {
+                  "Number": 463,
+                  "Content": "    - port: 3100",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "    - \u001b[38;5;33mport\u001b[0m: \u001b[38;5;37m3100",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 464,
+                  "Content": "      targetPort: 3100",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[0m      \u001b[38;5;33mtargetPort\u001b[0m: \u001b[38;5;37m3100",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 465,
+                  "Content": "---",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[0m---",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 466,
+                  "Content": "# ── Promtail (log shipper: pod logs → Loki) ───────────────────────────────────",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[38;5;239m# ── Promtail (log shipper: pod logs → Loki) ───────────────────────────────────",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 467,
+                  "Content": "apiVersion: apps/v1",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[0m\u001b[38;5;33mapiVersion\u001b[0m: apps/v1",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 468,
+                  "Content": "kind: DaemonSet",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[38;5;33mkind\u001b[0m: DaemonSet",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 469,
+                  "Content": "metadata:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[38;5;33mmetadata\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 470,
+                  "Content": "  name: promtail",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "  \u001b[38;5;33mname\u001b[0m: promtail",
+                  "FirstCause": false,
+                  "LastCause": true
+                },
+                {
+                  "Number": 471,
+                  "Content": "",
+                  "IsCause": false,
+                  "Annotation": "",
+                  "Truncated": true,
+                  "FirstCause": false,
+                  "LastCause": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "Type": "Kubernetes Security Check",
+          "ID": "KSV-0125",
+          "Title": "Restrict container images to trusted registries",
+          "Description": "Ensure that all containers use images only from trusted registry domains.",
+          "Message": "Container grafana in deployment grafana (namespace: aiempire) uses an image from an untrusted registry.",
+          "Namespace": "builtin.kubernetes.KSV0125",
+          "Query": "data.builtin.kubernetes.KSV0125.deny",
+          "Resolution": "Use images from trusted registries.",
+          "Severity": "MEDIUM",
+          "PrimaryURL": "https://avd.aquasec.com/misconfig/ksv-0125",
+          "References": [
+            "https://cloud.google.com/container-registry/docs/overview#registries",
+            "https://docs.aws.amazon.com/general/latest/gr/ecr.html",
+            "https://avd.aquasec.com/misconfig/ksv-0125"
+          ],
+          "Status": "FAIL",
+          "CauseMetadata": {
+            "Provider": "Kubernetes",
+            "Service": "general",
+            "StartLine": 284,
+            "EndLine": 321,
+            "Code": {
+              "Lines": [
+                {
+                  "Number": 284,
+                  "Content": "        app: grafana",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "        \u001b[38;5;33mapp\u001b[0m: grafana",
+                  "FirstCause": true,
+                  "LastCause": false
+                },
+                {
+                  "Number": 285,
+                  "Content": "    spec:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "    \u001b[38;5;33mspec\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 286,
+                  "Content": "      securityContext:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "      \u001b[38;5;33msecurityContext\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 287,
+                  "Content": "        runAsNonRoot: true",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "        \u001b[38;5;33mrunAsNonRoot\u001b[0m: \u001b[38;5;166mtrue",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 288,
+                  "Content": "        seccompProfile:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[0m        \u001b[38;5;33mseccompProfile\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 289,
+                  "Content": "          type: RuntimeDefault",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "          \u001b[38;5;33mtype\u001b[0m: RuntimeDefault",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 290,
+                  "Content": "      containers:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "      \u001b[38;5;33mcontainers\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 291,
+                  "Content": "        - name: grafana",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "        - \u001b[38;5;33mname\u001b[0m: grafana",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 292,
+                  "Content": "          #trivy:ignore:KSV0125 Official Grafana image pinned to an immutable upstream version for observability only.",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "          \u001b[38;5;239m#trivy:ignore:KSV0125 Official Grafana image pinned to an immutable upstream version for observability only.",
+                  "FirstCause": false,
+                  "LastCause": true
+                },
+                {
+                  "Number": 293,
+                  "Content": "",
+                  "IsCause": false,
+                  "Annotation": "",
+                  "Truncated": true,
+                  "FirstCause": false,
+                  "LastCause": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "Type": "Kubernetes Security Check",
+          "ID": "KSV-0125",
+          "Title": "Restrict container images to trusted registries",
+          "Description": "Ensure that all containers use images only from trusted registry domains.",
+          "Message": "Container loki in deployment loki (namespace: aiempire) uses an image from an untrusted registry.",
+          "Namespace": "builtin.kubernetes.KSV0125",
+          "Query": "data.builtin.kubernetes.KSV0125.deny",
+          "Resolution": "Use images from trusted registries.",
+          "Severity": "MEDIUM",
+          "PrimaryURL": "https://avd.aquasec.com/misconfig/ksv-0125",
+          "References": [
+            "https://cloud.google.com/container-registry/docs/overview#registries",
+            "https://docs.aws.amazon.com/general/latest/gr/ecr.html",
+            "https://avd.aquasec.com/misconfig/ksv-0125"
+          ],
+          "Status": "FAIL",
+          "CauseMetadata": {
+            "Provider": "Kubernetes",
+            "Service": "general",
+            "StartLine": 408,
+            "EndLine": 433,
+            "Code": {
+              "Lines": [
+                {
+                  "Number": 408,
+                  "Content": "  template:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "  \u001b[38;5;33mtemplate\u001b[0m:",
+                  "FirstCause": true,
+                  "LastCause": false
+                },
+                {
+                  "Number": 409,
+                  "Content": "    metadata:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "    \u001b[38;5;33mmetadata\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 410,
+                  "Content": "      labels:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "      \u001b[38;5;33mlabels\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 411,
+                  "Content": "        app: loki",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "        \u001b[38;5;33mapp\u001b[0m: loki",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 412,
+                  "Content": "    spec:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "    \u001b[38;5;33mspec\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 413,
+                  "Content": "      securityContext:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "      \u001b[38;5;33msecurityContext\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 414,
+                  "Content": "        runAsNonRoot: true",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "        \u001b[38;5;33mrunAsNonRoot\u001b[0m: \u001b[38;5;166mtrue",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 415,
+                  "Content": "        seccompProfile:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[0m        \u001b[38;5;33mseccompProfile\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 416,
+                  "Content": "          type: RuntimeDefault",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "          \u001b[38;5;33mtype\u001b[0m: RuntimeDefault",
+                  "FirstCause": false,
+                  "LastCause": true
+                },
+                {
+                  "Number": 417,
+                  "Content": "",
+                  "IsCause": false,
+                  "Annotation": "",
+                  "Truncated": true,
+                  "FirstCause": false,
+                  "LastCause": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "Type": "Kubernetes Security Check",
+          "ID": "KSV-0125",
+          "Title": "Restrict container images to trusted registries",
+          "Description": "Ensure that all containers use images only from trusted registry domains.",
+          "Message": "Container prometheus in deployment prometheus (namespace: aiempire) uses an image from an untrusted registry.",
+          "Namespace": "builtin.kubernetes.KSV0125",
+          "Query": "data.builtin.kubernetes.KSV0125.deny",
+          "Resolution": "Use images from trusted registries.",
+          "Severity": "MEDIUM",
+          "PrimaryURL": "https://avd.aquasec.com/misconfig/ksv-0125",
+          "References": [
+            "https://cloud.google.com/container-registry/docs/overview#registries",
+            "https://docs.aws.amazon.com/general/latest/gr/ecr.html",
+            "https://avd.aquasec.com/misconfig/ksv-0125"
+          ],
+          "Status": "FAIL",
+          "CauseMetadata": {
+            "Provider": "Kubernetes",
+            "Service": "general",
+            "StartLine": 155,
+            "EndLine": 185,
+            "Code": {
+              "Lines": [
+                {
+                  "Number": 155,
+                  "Content": "      containers:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "      \u001b[38;5;33mcontainers\u001b[0m:",
+                  "FirstCause": true,
+                  "LastCause": false
+                },
+                {
+                  "Number": 156,
+                  "Content": "        - name: prometheus",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "        - \u001b[38;5;33mname\u001b[0m: prometheus",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 157,
+                  "Content": "          #trivy:ignore:KSV0125 Official Prometheus image pinned to an immutable upstream version for observability only.",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "          \u001b[38;5;239m#trivy:ignore:KSV0125 Official Prometheus image pinned to an immutable upstream version for observability only.",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 158,
+                  "Content": "          image: prom/prometheus:v2.51.0",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[0m          \u001b[38;5;33mimage\u001b[0m: prom/prometheus:v2.51.0",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 159,
+                  "Content": "          args:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "          \u001b[38;5;33margs\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 160,
+                  "Content": "            - \"--config.file=/etc/prometheus/prometheus.yml\"",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "            - \u001b[38;5;37m\"--config.file=/etc/prometheus/prometheus.yml\"",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 161,
+                  "Content": "            - \"--storage.tsdb.path=/prometheus\"",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[0m            - \u001b[38;5;37m\"--storage.tsdb.path=/prometheus\"",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 162,
+                  "Content": "            - \"--storage.tsdb.retention.time=15d\"",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[0m            - \u001b[38;5;37m\"--storage.tsdb.retention.time=15d\"",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 163,
+                  "Content": "            - \"--web.enable-lifecycle\"",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[0m            - \u001b[38;5;37m\"--web.enable-lifecycle\"",
+                  "FirstCause": false,
+                  "LastCause": true
+                },
+                {
+                  "Number": 164,
+                  "Content": "",
+                  "IsCause": false,
+                  "Annotation": "",
+                  "Truncated": true,
+                  "FirstCause": false,
+                  "LastCause": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "Type": "Kubernetes Security Check",
+          "ID": "KSV-0125",
+          "Title": "Restrict container images to trusted registries",
+          "Description": "Ensure that all containers use images only from trusted registry domains.",
+          "Message": "Container promtail in daemonset promtail (namespace: aiempire) uses an image from an untrusted registry.",
+          "Namespace": "builtin.kubernetes.KSV0125",
+          "Query": "data.builtin.kubernetes.KSV0125.deny",
+          "Resolution": "Use images from trusted registries.",
+          "Severity": "MEDIUM",
+          "PrimaryURL": "https://avd.aquasec.com/misconfig/ksv-0125",
+          "References": [
+            "https://cloud.google.com/container-registry/docs/overview#registries",
+            "https://docs.aws.amazon.com/general/latest/gr/ecr.html",
+            "https://avd.aquasec.com/misconfig/ksv-0125"
+          ],
+          "Status": "FAIL",
+          "CauseMetadata": {
+            "Provider": "Kubernetes",
+            "Service": "general",
+            "StartLine": 481,
+            "EndLine": 513,
+            "Code": {
+              "Lines": [
+                {
+                  "Number": 481,
+                  "Content": "        app: promtail",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "        \u001b[38;5;33mapp\u001b[0m: promtail",
+                  "FirstCause": true,
+                  "LastCause": false
+                },
+                {
+                  "Number": 482,
+                  "Content": "    spec:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "    \u001b[38;5;33mspec\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 483,
+                  "Content": "      serviceAccountName: promtail-sa",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "      \u001b[38;5;33mserviceAccountName\u001b[0m: promtail-sa",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 484,
+                  "Content": "      securityContext:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "      \u001b[38;5;33msecurityContext\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 485,
+                  "Content": "        runAsNonRoot: true",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "        \u001b[38;5;33mrunAsNonRoot\u001b[0m: \u001b[38;5;166mtrue",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 486,
+                  "Content": "        seccompProfile:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[0m        \u001b[38;5;33mseccompProfile\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 487,
+                  "Content": "          type: RuntimeDefault",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "          \u001b[38;5;33mtype\u001b[0m: RuntimeDefault",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 488,
+                  "Content": "      tolerations:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "      \u001b[38;5;33mtolerations\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 489,
+                  "Content": "        - key: node-role.kubernetes.io/master",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "        - \u001b[38;5;33mkey\u001b[0m: node-role.kubernetes.io/master",
+                  "FirstCause": false,
+                  "LastCause": true
+                },
+                {
+                  "Number": 490,
+                  "Content": "",
+                  "IsCause": false,
+                  "Annotation": "",
+                  "Truncated": true,
+                  "FirstCause": false,
+                  "LastCause": false
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Target": "secrets.yaml",
+      "Class": "config",
+      "Type": "kubernetes",
+      "MisconfSummary": {
+        "Successes": 55,
+        "Failures": 0
+      }
+    },
+    {
+      "Target": "services-hpa-ingress.yaml",
+      "Class": "config",
+      "Type": "kubernetes",
+      "MisconfSummary": {
+        "Successes": 55,
+        "Failures": 0
+      }
+    },
+    {
+      "Target": "worker-deployment.yaml",
+      "Class": "config",
+      "Type": "kubernetes",
+      "MisconfSummary": {
+        "Successes": 54,
+        "Failures": 1
+      },
+      "Misconfigurations": [
+        {
+          "Type": "Kubernetes Security Check",
+          "ID": "KSV-0125",
+          "Title": "Restrict container images to trusted registries",
+          "Description": "Ensure that all containers use images only from trusted registry domains.",
+          "Message": "Container worker in deployment aiempire-worker (namespace: aiempire) uses an image from an untrusted registry.",
+          "Namespace": "builtin.kubernetes.KSV0125",
+          "Query": "data.builtin.kubernetes.KSV0125.deny",
+          "Resolution": "Use images from trusted registries.",
+          "Severity": "MEDIUM",
+          "PrimaryURL": "https://avd.aquasec.com/misconfig/ksv-0125",
+          "References": [
+            "https://cloud.google.com/container-registry/docs/overview#registries",
+            "https://docs.aws.amazon.com/general/latest/gr/ecr.html",
+            "https://avd.aquasec.com/misconfig/ksv-0125"
+          ],
+          "Status": "FAIL",
+          "CauseMetadata": {
+            "Provider": "Kubernetes",
+            "Service": "general",
+            "StartLine": 50,
+            "EndLine": 150,
+            "Code": {
+              "Lines": [
+                {
+                  "Number": 50,
+                  "Content": "        - name: worker",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "        - \u001b[38;5;33mname\u001b[0m: worker",
+                  "FirstCause": true,
+                  "LastCause": false
+                },
+                {
+                  "Number": 51,
+                  "Content": "          #trivy:ignore:KSV0125 AI Empire production image is pulled from the private GitHub Container Registry org namespace.",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "          \u001b[38;5;239m#trivy:ignore:KSV0125 AI Empire production image is pulled from the private GitHub Container Registry org namespace.",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 52,
+                  "Content": "          image: ghcr.io/bossmodeindia-source/aiempire-nestjs:v69",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "\u001b[0m          \u001b[38;5;33mimage\u001b[0m: ghcr.io/bossmodeindia-source/aiempire-nestjs:v69",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 53,
+                  "Content": "          imagePullPolicy: Always",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "          \u001b[38;5;33mimagePullPolicy\u001b[0m: Always",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 54,
+                  "Content": "          command: [\"node\", \"dist/src/worker.js\"]",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "          \u001b[38;5;33mcommand\u001b[0m: [\u001b[38;5;37m\"node\"\u001b[0m, \u001b[38;5;37m\"dist/src/worker.js\"\u001b[0m]",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 55,
+                  "Content": "",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 56,
+                  "Content": "          envFrom:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "          \u001b[38;5;33menvFrom\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 57,
+                  "Content": "            - configMapRef:",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "            - \u001b[38;5;33mconfigMapRef\u001b[0m:",
+                  "FirstCause": false,
+                  "LastCause": false
+                },
+                {
+                  "Number": 58,
+                  "Content": "                name: aiempire-config",
+                  "IsCause": true,
+                  "Annotation": "",
+                  "Truncated": false,
+                  "Highlighted": "                \u001b[38;5;33mname\u001b[0m: aiempire-config",
+                  "FirstCause": false,
+                  "LastCause": true
+                },
+                {
+                  "Number": 59,
+                  "Content": "",
+                  "IsCause": false,
+                  "Annotation": "",
+                  "Truncated": true,
+                  "FirstCause": false,
+                  "LastCause": false
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

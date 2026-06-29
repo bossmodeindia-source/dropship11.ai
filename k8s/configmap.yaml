@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aiempire-config
+  namespace: aiempire
+#trivy:ignore:KSV01010 PORT and THROTTLE_LIMIT are non-sensitive runtime tuning values, not credentials or secrets.
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  JWT_EXPIRES_IN: "15m"
+  JWT_REFRESH_EXPIRES_IN: "7d"
+  THROTTLE_TTL: "60"
+  THROTTLE_LIMIT: "100"
+  SWAGGER_ENABLED: "false"
+  DATABASE_SSL: "true"
+  LOG_LEVEL: "info"
+  ALLOWED_ORIGINS: "https://app.aiempirebot.com"
+  # V65: OpenTelemetry
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+  OTEL_SERVICE_NAME: "aiempire-api"
+  OTEL_SAMPLING_RATIO: "0.1"
+  OTEL_DISABLED: "false"

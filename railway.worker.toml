@@ -1,0 +1,20 @@
+# ── AI Empire V64 — Railway Worker Service ───────────────────────────────────
+#
+# HOW TO USE:
+#   1. Railway → New Service → Deploy from repo (same repo as API)
+#   2. Settings → Config as Code → Config File Path: railway.worker.toml
+#   3. Share environment variables from the API service
+#   4. Required vars: DATABASE_URL, REDIS_URL, JWT_SECRET,
+#      ENCRYPTION_MASTER_KEY, WEBHOOK_HMAC_SECRET, INTERNAL_SERVICE_KEY
+#
+# NestJS with sourceRoot="src" outputs to dist/src/worker.js
+# ─────────────────────────────────────────────────────────────────────────────
+
+[build]
+builder      = "NIXPACKS"
+buildCommand = "npm ci --frozen-lockfile && npm run build"
+
+[deploy]
+startCommand            = "node dist/src/worker.js"
+restartPolicyType       = "ON_FAILURE"
+restartPolicyMaxRetries = 3
