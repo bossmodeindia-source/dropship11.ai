@@ -19,15 +19,21 @@ import {
   ConflictException,
   ForbiddenException,
   Inject,
+  BadRequestException,
 } from '@nestjs/common';
 import { Pool } from 'pg';
+import * as crypto from 'crypto';
 import { DB_POOL } from '../common/database/database.module';
 import { AuditService } from '../audit/audit.service';
 import {
   CreateProviderDto,
   UpdateProviderDto,
   ApproveProviderDto,
+  ImportProvidersDto,
 } from './dto/provider-registry.dto';
+
+const ALGORITHM = 'aes-256-gcm';
+const IV_LEN = 12;
 
 export interface AiProviderCatalogEntry {
   id: string;
@@ -41,14 +47,48 @@ export interface AiProviderCatalogEntry {
   status: 'pending' | 'approved' | 'disabled' | 'deprecated';
   requiresSecondaryKey: boolean;
   secondaryKeyLabel: string | null;
+  healthCheckUrl: string | null;
   capabilities: Record<string, unknown>;
   pricingPerUnit: number | null;
   pricingUnit: string | null;
   approvedBy: string | null;
   approvedAt: Date | null;
   sortOrder: number;
+  logoUrl?: string | null;
+  providerType?: string | null;
+  apiBaseUrl?: string | null;
+  organizationId?: string | null;
+  supportedModels?: string[];
+  defaultModel?: string | null;
+  generationDefaults?: Record<string, unknown>;
+  pricing?: Record<string, unknown>;
+  quotas?: Record<string, unknown>;
+  rateLimits?: Record<string, unknown>;
+  circuitBreaker?: Record<string, unknown>;
+  priority?: number;
+  fallbackPriority?: number;
+  enabled?: boolean;
+  byokEnabled?: boolean;
+  supportsStreaming?: boolean;
+  supportsVision?: boolean;
+  supportsImageGeneration?: boolean;
+  supportsFunctionCalling?: boolean;
+  supportsJsonMode?: boolean;
+  apiFormat?: string;
+  endpointPath?: string;
+  authHeaderName?: string;
+  authHeaderTemplate?: string;
+  requestTemplate?: Record<string, unknown>;
+  responseMapping?: Record<string, unknown>;
+  healthStatus?: string;
+  apiKeyConfigured?: boolean;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface AiProviderRuntimeConfig extends AiProviderCatalogEntry {
+  platformApiKey: string | null;
+  platformKeyAvailable: boolean;
 }
 
 @Injectable()
@@ -79,27 +119,79 @@ export class AiProviderRegistryService {
       throw new ConflictException(`Provider '${dto.providerKey}' already exists`);
     }
 
+    const extended = this.toExtendedColumns(dto);
+    const encrypted = dto.apiKey ? this.encrypt(dto.apiKey) : null;
+
     const result = await this.db.query<AiProviderCatalogEntry>(
       `INSERT INTO ai_provider_catalog (
          provider_key, display_name, category, description, sdk_class,
          base_url, docs_url, status, requires_secondary_key, secondary_key_label,
-         health_check_url, capabilities, pricing_per_unit, pricing_unit, sort_order
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8,$9,$10,$11,$12,$13,$14)
+         health_check_url, capabilities, pricing_per_unit, pricing_unit, sort_order,
+         logo_url, provider_type, api_base_url, encrypted_api_key, api_key_iv,
+         api_key_auth_tag, organization_id, supported_models, default_model,
+         generation_defaults, pricing, quotas, rate_limits, circuit_breaker,
+         priority, fallback_priority, is_enabled, byok_enabled,
+         supports_streaming, supports_vision, supports_image_generation,
+         supports_function_calling, supports_json_mode, api_format, endpoint_path,
+         auth_header_name, auth_header_template, request_template, response_mapping,
+         daily_budget, monthly_budget
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+         $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,
+         $31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46)
        RETURNING *`,
       [
         dto.providerKey, dto.displayName, dto.category,
         dto.description ?? null, dto.sdkClass ?? null,
         dto.baseUrl ?? null, dto.docsUrl ?? null,
+        dto.enabled === false ? 'disabled' : 'pending',
         dto.requiresSecondaryKey ?? false,
         dto.secondaryKeyLabel ?? null,
-        dto.healthCheckUrl ?? null,
+        dto.healthCheckUrl ?? dto.healthCheckEndpoint ?? null,
         JSON.stringify(dto.capabilities ?? {}),
         dto.pricingPerUnit ?? null, dto.pricingUnit ?? null,
         dto.sortOrder ?? 0,
+        dto.logoUrl ?? null,
+        dto.providerType ?? extended.providerType,
+        dto.apiBaseUrl ?? dto.baseUrl ?? null,
+        encrypted?.ciphertext ?? null,
+        encrypted?.iv ?? null,
+        encrypted?.authTag ?? null,
+        dto.organizationId ?? null,
+        JSON.stringify(extended.supportedModels),
+        dto.defaultModel ?? null,
+        JSON.stringify(extended.generationDefaults),
+        JSON.stringify(extended.pricing),
+        JSON.stringify(extended.quotas),
+        JSON.stringify(extended.rateLimits),
+        JSON.stringify(extended.circuitBreaker),
+        dto.priority ?? dto.sortOrder ?? 100,
+        dto.fallbackPriority ?? dto.priority ?? 100,
+        dto.enabled ?? true,
+        dto.byokEnabled ?? true,
+        dto.supportsStreaming ?? Boolean(dto.capabilities?.supportsStreaming),
+        dto.supportsVision ?? Boolean(dto.capabilities?.supportsVision),
+        dto.supportsImageGeneration ?? Boolean(dto.capabilities?.supportsImages),
+        dto.supportsFunctionCalling ?? Boolean(dto.capabilities?.supportsFunctionCalling),
+        dto.supportsJsonMode ?? Boolean(dto.capabilities?.supportsJsonMode),
+        dto.apiFormat ?? 'openai_compatible',
+        dto.endpointPath ?? '/chat/completions',
+        dto.authHeaderName ?? 'Authorization',
+        dto.authHeaderTemplate ?? 'Bearer {{apiKey}}',
+        JSON.stringify(dto.requestTemplate ?? {}),
+        JSON.stringify(dto.responseMapping ?? {}),
+        dto.dailyBudget ?? null,
+        dto.monthlyBudget ?? null,
       ],
     );
 
-    await this.auditProviderAction(result.rows[0].id, adminId, 'submitted', null, 'pending', dto.description);
+    await this.auditProviderAction(
+      result.rows[0].id,
+      adminId,
+      'submitted',
+      null,
+      result.rows[0].status,
+      dto.description,
+    );
     this.invalidateCache();
 
     this.logger.log(`[ADMIN] Provider created: ${dto.providerKey} by admin ${adminId}`);
@@ -180,12 +272,59 @@ export class AiProviderRegistryService {
 
     if (dto.displayName !== undefined) { setClauses.push(`display_name = $${idx++}`); values.push(dto.displayName); }
     if (dto.description !== undefined) { setClauses.push(`description = $${idx++}`); values.push(dto.description); }
+    if (dto.category !== undefined)    { setClauses.push(`category = $${idx++}`); values.push(dto.category); }
     if (dto.baseUrl !== undefined)     { setClauses.push(`base_url = $${idx++}`); values.push(dto.baseUrl); }
+    if (dto.apiBaseUrl !== undefined)  { setClauses.push(`api_base_url = $${idx++}`); values.push(dto.apiBaseUrl); }
     if (dto.docsUrl !== undefined)     { setClauses.push(`docs_url = $${idx++}`); values.push(dto.docsUrl); }
+    if (dto.logoUrl !== undefined)     { setClauses.push(`logo_url = $${idx++}`); values.push(dto.logoUrl); }
+    if (dto.providerType !== undefined){ setClauses.push(`provider_type = $${idx++}`); values.push(dto.providerType); }
+    if (dto.organizationId !== undefined){ setClauses.push(`organization_id = $${idx++}`); values.push(dto.organizationId); }
+    if (dto.healthCheckEndpoint !== undefined){ setClauses.push(`health_check_url = $${idx++}`); values.push(dto.healthCheckEndpoint); }
     if (dto.capabilities !== undefined){ setClauses.push(`capabilities = $${idx++}`); values.push(JSON.stringify(dto.capabilities)); }
+    if (dto.supportedModels !== undefined || dto.modelList !== undefined) {
+      setClauses.push(`supported_models = $${idx++}`);
+      values.push(JSON.stringify(dto.supportedModels ?? dto.modelList ?? []));
+    }
+    if (dto.defaultModel !== undefined) { setClauses.push(`default_model = $${idx++}`); values.push(dto.defaultModel); }
+    const extended = this.toExtendedColumns(dto);
+    if (this.hasGenerationDefaults(dto)) { setClauses.push(`generation_defaults = $${idx++}`); values.push(JSON.stringify(extended.generationDefaults)); }
+    if (dto.quotas !== undefined || dto.dailyBudget !== undefined || dto.monthlyBudget !== undefined) {
+      setClauses.push(`quotas = $${idx++}`);
+      values.push(JSON.stringify(extended.quotas));
+    }
+    if (dto.rateLimits !== undefined || dto.requestsPerMinute !== undefined || dto.requestsPerDay !== undefined) {
+      setClauses.push(`rate_limits = $${idx++}`);
+      values.push(JSON.stringify(extended.rateLimits));
+    }
+    if (dto.circuitBreakerSettings !== undefined) { setClauses.push(`circuit_breaker = $${idx++}`); values.push(JSON.stringify(dto.circuitBreakerSettings)); }
+    if (dto.costPer1KTokens !== undefined) { setClauses.push(`pricing = $${idx++}`); values.push(JSON.stringify(extended.pricing)); }
     if (dto.pricingPerUnit !== undefined){ setClauses.push(`pricing_per_unit = $${idx++}`); values.push(dto.pricingPerUnit); }
     if (dto.pricingUnit !== undefined)  { setClauses.push(`pricing_unit = $${idx++}`); values.push(dto.pricingUnit); }
     if (dto.sortOrder !== undefined)    { setClauses.push(`sort_order = $${idx++}`); values.push(dto.sortOrder); }
+    if (dto.priority !== undefined)     { setClauses.push(`priority = $${idx++}`); values.push(dto.priority); }
+    if (dto.fallbackPriority !== undefined){ setClauses.push(`fallback_priority = $${idx++}`); values.push(dto.fallbackPriority); }
+    if (dto.enabled !== undefined)      { setClauses.push(`is_enabled = $${idx++}`); values.push(dto.enabled); }
+    if (dto.byokEnabled !== undefined)  { setClauses.push(`byok_enabled = $${idx++}`); values.push(dto.byokEnabled); }
+    if (dto.supportsStreaming !== undefined){ setClauses.push(`supports_streaming = $${idx++}`); values.push(dto.supportsStreaming); }
+    if (dto.supportsVision !== undefined){ setClauses.push(`supports_vision = $${idx++}`); values.push(dto.supportsVision); }
+    if (dto.supportsImageGeneration !== undefined){ setClauses.push(`supports_image_generation = $${idx++}`); values.push(dto.supportsImageGeneration); }
+    if (dto.supportsFunctionCalling !== undefined){ setClauses.push(`supports_function_calling = $${idx++}`); values.push(dto.supportsFunctionCalling); }
+    if (dto.supportsJsonMode !== undefined){ setClauses.push(`supports_json_mode = $${idx++}`); values.push(dto.supportsJsonMode); }
+    if (dto.apiFormat !== undefined)    { setClauses.push(`api_format = $${idx++}`); values.push(dto.apiFormat); }
+    if (dto.endpointPath !== undefined) { setClauses.push(`endpoint_path = $${idx++}`); values.push(dto.endpointPath); }
+    if (dto.authHeaderName !== undefined){ setClauses.push(`auth_header_name = $${idx++}`); values.push(dto.authHeaderName); }
+    if (dto.authHeaderTemplate !== undefined){ setClauses.push(`auth_header_template = $${idx++}`); values.push(dto.authHeaderTemplate); }
+    if (dto.requestTemplate !== undefined){ setClauses.push(`request_template = $${idx++}`); values.push(JSON.stringify(dto.requestTemplate)); }
+    if (dto.responseMapping !== undefined){ setClauses.push(`response_mapping = $${idx++}`); values.push(JSON.stringify(dto.responseMapping)); }
+    if (dto.dailyBudget !== undefined)  { setClauses.push(`daily_budget = $${idx++}`); values.push(dto.dailyBudget); }
+    if (dto.monthlyBudget !== undefined){ setClauses.push(`monthly_budget = $${idx++}`); values.push(dto.monthlyBudget); }
+    if (dto.apiKey !== undefined) {
+      const encrypted = this.encrypt(dto.apiKey);
+      setClauses.push(`encrypted_api_key = $${idx++}`); values.push(encrypted.ciphertext);
+      setClauses.push(`api_key_iv = $${idx++}`); values.push(encrypted.iv);
+      setClauses.push(`api_key_auth_tag = $${idx++}`); values.push(encrypted.authTag);
+      setClauses.push(`api_key_version = api_key_version + 1`);
+    }
 
     if (setClauses.length === 0) return this.mapRow(provider);
 
@@ -199,7 +338,28 @@ export class AiProviderRegistryService {
 
     this.invalidateCache();
     this.logger.log(`[ADMIN] Provider updated: ${provider.provider_key} by admin ${adminId}`);
+    await this.auditProviderAction(
+      providerId,
+      adminId,
+      dto.apiKey !== undefined ? 'key_rotated' : 'updated',
+      provider.status,
+      result.rows[0].status,
+      dto.apiKey !== undefined ? 'Provider API key rotated securely' : 'Provider metadata updated',
+    );
     return this.mapRow(result.rows[0]);
+  }
+
+  async deleteProvider(providerId: string, adminId: string): Promise<void> {
+    const provider = await this.getProviderByIdRaw(providerId);
+    if (!provider) throw new NotFoundException(`Provider ${providerId} not found`);
+    await this.db.query(
+      `UPDATE ai_provider_catalog
+       SET status = 'deprecated', is_enabled = false, disabled_reason = 'Deleted by admin', updated_at = NOW()
+       WHERE id = $1`,
+      [providerId],
+    );
+    await this.auditProviderAction(providerId, adminId, 'deleted', provider.status, 'deprecated', 'Soft deleted by admin');
+    this.invalidateCache();
   }
 
   // ── Public: List Approved Providers (for user connection UI) ─────────────
@@ -211,8 +371,8 @@ export class AiProviderRegistryService {
 
     const result = await this.db.query(
       `SELECT * FROM ai_provider_catalog
-       WHERE status = 'approved'
-       ORDER BY sort_order ASC, display_name ASC`,
+       WHERE status = 'approved' AND COALESCE(is_enabled, true) = true
+       ORDER BY priority ASC, fallback_priority ASC, sort_order ASC, display_name ASC`,
     );
 
     this.approvedProvidersCache = result.rows.map(r => this.mapRow(r));
@@ -224,7 +384,7 @@ export class AiProviderRegistryService {
 
   async listAllProviders(): Promise<AiProviderCatalogEntry[]> {
     const result = await this.db.query(
-      `SELECT * FROM ai_provider_catalog ORDER BY sort_order ASC, display_name ASC`,
+      `SELECT * FROM ai_provider_catalog ORDER BY priority ASC, fallback_priority ASC, sort_order ASC, display_name ASC`,
     );
     return result.rows.map(r => this.mapRow(r));
   }
@@ -240,12 +400,104 @@ export class AiProviderRegistryService {
       throw new NotFoundException(`Provider ${providerId} not found`);
     }
     const provider = this.mapRow(result.rows[0]);
-    if (provider.status !== 'approved') {
+    if (provider.status !== 'approved' || provider.enabled === false) {
       throw new ForbiddenException(
         `Provider '${provider.displayName}' is not approved for user connections (status: ${provider.status})`,
       );
     }
     return provider;
+  }
+
+  async exportProviders(adminId: string): Promise<{ exportedAt: string; providers: AiProviderCatalogEntry[] }> {
+    const providers = await this.listAllProviders();
+    await Promise.all(providers.map(p =>
+      this.auditProviderAction(p.id, adminId, 'exported', p.status, p.status, 'Provider configuration exported'),
+    ));
+    return { exportedAt: new Date().toISOString(), providers };
+  }
+
+  async importProviders(dto: ImportProvidersDto, adminId: string): Promise<{ imported: number; skipped: number }> {
+    let imported = 0;
+    let skipped = 0;
+    for (const provider of dto.providers) {
+      try {
+        await this.createProvider(provider, adminId);
+        imported += 1;
+      } catch (err) {
+        if (err instanceof ConflictException) {
+          skipped += 1;
+          continue;
+        }
+        throw err;
+      }
+    }
+    return { imported, skipped };
+  }
+
+  async testProviderConnectivity(providerId: string, adminId: string): Promise<{ status: string; latencyMs: number | null; error?: string }> {
+    const raw = await this.getProviderByIdRaw(providerId);
+    if (!raw) throw new NotFoundException(`Provider ${providerId} not found`);
+    const provider = this.mapRow(raw);
+    const url = provider.healthCheckUrl ?? this.joinUrl(provider.apiBaseUrl ?? provider.baseUrl, provider.endpointPath ?? '/');
+    if (!url) throw new BadRequestException('Provider has no health check endpoint or API base URL');
+
+    const start = Date.now();
+    try {
+      const headers: Record<string, string> = {};
+      const apiKey = raw.encrypted_api_key
+        ? this.decrypt(raw.encrypted_api_key, raw.api_key_iv, raw.api_key_auth_tag)
+        : null;
+      if (apiKey) {
+        headers[provider.authHeaderName ?? 'Authorization'] =
+          (provider.authHeaderTemplate ?? 'Bearer {{apiKey}}').replace('{{apiKey}}', apiKey);
+      }
+      const res = await fetch(url, {
+        method: raw.health_check_method ?? 'GET',
+        headers,
+        signal: AbortSignal.timeout(Number(provider.generationDefaults?.timeoutMs ?? 10_000)),
+      });
+      const latencyMs = Date.now() - start;
+      const status = res.status >= 200 && res.status < 500 ? 'healthy' : 'down';
+      await this.recordHealthSnapshot(providerId, status as 'healthy' | 'down', latencyMs, res.ok ? undefined : `HTTP ${res.status}`);
+      await this.db.query(
+        `UPDATE ai_provider_catalog SET health_status = $1, last_health_check_at = NOW(), updated_at = NOW() WHERE id = $2`,
+        [status, providerId],
+      );
+      await this.auditProviderAction(providerId, adminId, 'connectivity_tested', provider.status, provider.status, status);
+      return { status, latencyMs, error: res.ok ? undefined : `HTTP ${res.status}` };
+    } catch (err) {
+      const latencyMs = Date.now() - start;
+      const error = (err as Error).message;
+      await this.recordHealthSnapshot(providerId, 'down', latencyMs, error);
+      await this.db.query(
+        `UPDATE ai_provider_catalog SET health_status = 'down', last_health_check_at = NOW(), updated_at = NOW() WHERE id = $1`,
+        [providerId],
+      );
+      await this.auditProviderAction(providerId, adminId, 'connectivity_tested', provider.status, provider.status, error);
+      return { status: 'down', latencyMs, error };
+    }
+  }
+
+  async getRuntimeProviderByKey(providerKey: string): Promise<AiProviderRuntimeConfig | null> {
+    const result = await this.db.query(
+      `SELECT * FROM ai_provider_catalog
+       WHERE provider_key = $1
+         AND status = 'approved'
+         AND COALESCE(is_enabled, true) = true
+       LIMIT 1`,
+      [providerKey],
+    );
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0];
+    const mapped = this.mapRow(row);
+    const platformApiKey = row.encrypted_api_key
+      ? this.decrypt(row.encrypted_api_key, row.api_key_iv, row.api_key_auth_tag)
+      : null;
+    return {
+      ...mapped,
+      platformApiKey,
+      platformKeyAvailable: Boolean(platformApiKey),
+    };
   }
 
   // ── Provider Health Snapshot ──────────────────────────────────────────────
@@ -314,6 +566,97 @@ export class AiProviderRegistryService {
     );
   }
 
+  private getMasterKey(): Buffer {
+    const key = process.env.ENCRYPTION_MASTER_KEY;
+    if (!key || key.length < 32) {
+      throw new Error('ENCRYPTION_MASTER_KEY not set or too short');
+    }
+    return Buffer.from(key.slice(0, 64), 'hex');
+  }
+
+  private encrypt(plaintext: string): { ciphertext: string; iv: string; authTag: string } {
+    const iv = crypto.randomBytes(IV_LEN);
+    const cipher = crypto.createCipheriv(ALGORITHM, this.getMasterKey(), iv);
+    const enc = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+    return {
+      ciphertext: enc.toString('base64'),
+      iv: iv.toString('base64'),
+      authTag: cipher.getAuthTag().toString('base64'),
+    };
+  }
+
+  private decrypt(ciphertext: string, iv: string, authTag: string): string {
+    const decipher = crypto.createDecipheriv(ALGORITHM, this.getMasterKey(), Buffer.from(iv, 'base64'));
+    decipher.setAuthTag(Buffer.from(authTag, 'base64'));
+    return Buffer.concat([
+      decipher.update(Buffer.from(ciphertext, 'base64')),
+      decipher.final(),
+    ]).toString('utf8');
+  }
+
+  private json<T>(value: unknown, fallback: T): T {
+    if (value === null || value === undefined) return fallback;
+    if (typeof value === 'string') {
+      try { return JSON.parse(value) as T; } catch { return fallback; }
+    }
+    return value as T;
+  }
+
+  private toExtendedColumns(dto: Partial<CreateProviderDto & UpdateProviderDto>) {
+    const supportedModels = dto.supportedModels ?? dto.modelList ?? [];
+    return {
+      providerType: dto.providerType ?? this.categoryToProviderType(dto.category),
+      supportedModels,
+      generationDefaults: {
+        maxTokens: dto.maxTokens,
+        temperature: dto.temperature,
+        topP: dto.topP,
+        timeoutMs: dto.timeoutMs,
+        retryCount: dto.retryCount,
+      },
+      pricing: {
+        costPer1KTokens: dto.costPer1KTokens ?? dto.pricingPerUnit,
+        pricingUnit: dto.pricingUnit,
+      },
+      quotas: {
+        ...(dto.quotas ?? {}),
+        dailyBudget: dto.dailyBudget,
+        monthlyBudget: dto.monthlyBudget,
+      },
+      rateLimits: {
+        ...(dto.rateLimits ?? {}),
+        requestsPerMinute: dto.requestsPerMinute,
+        requestsPerDay: dto.requestsPerDay,
+      },
+      circuitBreaker: dto.circuitBreakerSettings ?? {},
+    };
+  }
+
+  private hasGenerationDefaults(dto: Partial<CreateProviderDto & UpdateProviderDto>): boolean {
+    return dto.maxTokens !== undefined ||
+      dto.temperature !== undefined ||
+      dto.topP !== undefined ||
+      dto.timeoutMs !== undefined ||
+      dto.retryCount !== undefined;
+  }
+
+  private categoryToProviderType(category?: string): string {
+    switch (category) {
+      case 'image_generation': return 'image';
+      case 'video_generation': return 'video';
+      case 'voice': return 'audio';
+      case 'embedding': return 'embedding';
+      case 'multimodal': return 'vision';
+      default: return 'chat';
+    }
+  }
+
+  private joinUrl(base?: string | null, path?: string | null): string | null {
+    if (!base) return null;
+    if (!path) return base;
+    return `${base.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
+  }
+
   private invalidateCache(): void {
     this.approvedProvidersCache = [];
     this.cacheExpiresAt = 0;
@@ -332,6 +675,7 @@ export class AiProviderRegistryService {
       status:               row.status,
       requiresSecondaryKey: row.requires_secondary_key,
       secondaryKeyLabel:    row.secondary_key_label,
+      healthCheckUrl:       row.health_check_url ?? null,
       capabilities:         typeof row.capabilities === 'string'
                               ? JSON.parse(row.capabilities)
                               : (row.capabilities ?? {}),
@@ -340,6 +684,34 @@ export class AiProviderRegistryService {
       approvedBy:           row.approved_by,
       approvedAt:           row.approved_at,
       sortOrder:            row.sort_order,
+      logoUrl:              row.logo_url ?? null,
+      providerType:         row.provider_type ?? this.categoryToProviderType(row.category),
+      apiBaseUrl:           row.api_base_url ?? row.base_url ?? null,
+      organizationId:       row.organization_id ?? null,
+      supportedModels:      this.json<string[]>(row.supported_models, []),
+      defaultModel:         row.default_model ?? null,
+      generationDefaults:   this.json<Record<string, unknown>>(row.generation_defaults, {}),
+      pricing:              this.json<Record<string, unknown>>(row.pricing, {}),
+      quotas:               this.json<Record<string, unknown>>(row.quotas, {}),
+      rateLimits:           this.json<Record<string, unknown>>(row.rate_limits, {}),
+      circuitBreaker:       this.json<Record<string, unknown>>(row.circuit_breaker, {}),
+      priority:             Number(row.priority ?? row.sort_order ?? 100),
+      fallbackPriority:     Number(row.fallback_priority ?? row.priority ?? 100),
+      enabled:              row.is_enabled ?? row.status === 'approved',
+      byokEnabled:          row.byok_enabled ?? true,
+      supportsStreaming:    row.supports_streaming ?? Boolean(row.capabilities?.supportsStreaming),
+      supportsVision:       row.supports_vision ?? Boolean(row.capabilities?.supportsVision),
+      supportsImageGeneration: row.supports_image_generation ?? Boolean(row.capabilities?.supportsImages),
+      supportsFunctionCalling: row.supports_function_calling ?? Boolean(row.capabilities?.supportsFunctionCalling),
+      supportsJsonMode:     row.supports_json_mode ?? Boolean(row.capabilities?.supportsJsonMode),
+      apiFormat:            row.api_format ?? 'openai_compatible',
+      endpointPath:         row.endpoint_path ?? '/chat/completions',
+      authHeaderName:       row.auth_header_name ?? 'Authorization',
+      authHeaderTemplate:   row.auth_header_template ?? 'Bearer {{apiKey}}',
+      requestTemplate:      this.json<Record<string, unknown>>(row.request_template, {}),
+      responseMapping:      this.json<Record<string, unknown>>(row.response_mapping, {}),
+      healthStatus:         row.health_status ?? 'unknown',
+      apiKeyConfigured:     Boolean(row.encrypted_api_key),
       createdAt:            row.created_at,
       updatedAt:            row.updated_at,
     };

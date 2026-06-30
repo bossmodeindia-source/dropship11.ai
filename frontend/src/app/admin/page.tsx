@@ -116,6 +116,19 @@ export default function AdminPage() {
           ))}
         </div>
 
+        <div className="mb-8">
+          <Link
+            href="/admin/ai-providers"
+            className="inline-flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-2xl px-5 py-4 hover:border-indigo-600 transition-colors"
+          >
+            <span className="text-2xl">🧠</span>
+            <span>
+              <span className="block font-semibold text-white">AI Providers</span>
+              <span className="block text-gray-500 text-sm">Add, rotate, test, prioritize, and monitor dynamic AI providers</span>
+            </span>
+          </Link>
+        </div>
+
         {/* Users table */}
         <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">

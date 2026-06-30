@@ -16,6 +16,7 @@ import {
   UpdateProviderDto,
   ApproveProviderDto,
   DisableProviderDto,
+  ImportProvidersDto,
 } from './dto/provider-registry.dto';
 import { JwtAuthGuard } from '../common/guards';
 import { Roles }        from '../common/decorators/roles.decorator';
@@ -75,6 +76,43 @@ export class AiProviderRegistryController {
     return this.registry.updateProvider(id, dto, req.user.id);
   }
 
+  /** Soft-delete/deprecate a provider without breaking audit history */
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  async deleteProvider(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req: any,
+  ) {
+    await this.registry.deleteProvider(id, req.user.id);
+    return { message: 'Provider deprecated', providerId: id };
+  }
+
+  /** Test configured health/API connectivity with masked credentials */
+  @Post(':id/test')
+  @HttpCode(HttpStatus.OK)
+  async testProvider(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req: any,
+  ) {
+    return this.registry.testProviderConnectivity(id, req.user.id);
+  }
+
+  /** Export provider metadata; platform API keys are never exported */
+  @Get('export')
+  async exportProviders(@Request() req: any) {
+    return this.registry.exportProviders(req.user.id);
+  }
+
+  /** Import provider metadata from an admin-provided JSON payload */
+  @Post('import')
+  @HttpCode(HttpStatus.OK)
+  async importProviders(
+    @Body() dto: ImportProvidersDto,
+    @Request() req: any,
+  ) {
+    return this.registry.importProviders(dto, req.user.id);
+  }
+
   /** Health summary across all providers */
   @Get('health')
   async getHealthSummary() {
@@ -99,10 +137,23 @@ export class AiProviderPublicController {
       displayName:          p.displayName,
       category:             p.category,
       description:          p.description,
+      logoUrl:              p.logoUrl,
+      providerType:         p.providerType,
       docsUrl:              p.docsUrl,
       requiresSecondaryKey: p.requiresSecondaryKey,
       secondaryKeyLabel:    p.secondaryKeyLabel,
       capabilities:         p.capabilities,
+      supportedModels:      p.supportedModels,
+      defaultModel:         p.defaultModel,
+      features: {
+        streaming:          p.supportsStreaming,
+        vision:             p.supportsVision,
+        imageGeneration:    p.supportsImageGeneration,
+        functionCalling:    p.supportsFunctionCalling,
+        jsonMode:           p.supportsJsonMode,
+      },
+      status:               p.healthStatus,
+      byokEnabled:          p.byokEnabled,
       pricingUnit:          p.pricingUnit,
     }));
   }

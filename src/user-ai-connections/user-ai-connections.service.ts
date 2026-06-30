@@ -385,71 +385,51 @@ export class UserAiConnectionsService {
     apiKey: string,
     secondaryKey?: string,
   ): Promise<void> {
-    const validators: Record<string, () => Promise<void>> = {
-      openai:    () => this.pingOpenAi(apiKey),
-      claude:    () => this.pingClaude(apiKey),
-      openrouter: () => this.pingOpenRouter(apiKey),
-      runway:    () => this.pingRunway(apiKey),
-      elevenlabs: () => this.pingElevenLabs(apiKey),
-      // flux, kling, nvidia: accept key optimistically (no public ping endpoint)
-    };
-
-    const validator = validators[providerKey];
-    if (validator) {
-      try {
-        await validator();
-      } catch (err) {
-        throw new UnprocessableEntityException(
-          `API key validation failed for '${providerKey}': ${(err as Error).message}`,
-        );
-      }
+    const provider = await this.registry.getRuntimeProviderByKey(providerKey);
+    if (!provider) {
+      throw new UnprocessableEntityException(`Provider '${providerKey}' is not enabled`);
     }
-    // If no validator defined, key accepted (user responsible for correctness)
+
+    const url = provider.healthCheckUrl ??
+      this.joinUrl(provider.apiBaseUrl ?? provider.baseUrl, provider.endpointPath ?? '/');
+
+    if (!url) {
+      // Some future providers may not expose a validation endpoint. The key is
+      // still encrypted and will be validated on first real use.
+      return;
+    }
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    headers[provider.authHeaderName ?? 'Authorization'] =
+      (provider.authHeaderTemplate ?? 'Bearer {{apiKey}}')
+        .replace('{{apiKey}}', apiKey)
+        .replace('{{secondaryKey}}', secondaryKey ?? '');
+
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        headers,
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.status === 401 || res.status === 403) {
+        throw new Error('Invalid API key');
+      }
+      if (res.status >= 500) {
+        throw new Error(`Provider validation endpoint responded with ${res.status}`);
+      }
+    } catch (err) {
+      throw new UnprocessableEntityException(
+        `API key validation failed for '${providerKey}': ${(err as Error).message}`,
+      );
+    }
   }
 
-  private async pingOpenAi(apiKey: string): Promise<void> {
-    const res = await fetch('https://api.openai.com/v1/models', {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (res.status === 401) throw new Error('Invalid API key');
-    if (!res.ok) throw new Error(`OpenAI responded with ${res.status}`);
-  }
-
-  private async pingClaude(apiKey: string): Promise<void> {
-    const res = await fetch('https://api.anthropic.com/v1/models', {
-      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (res.status === 401) throw new Error('Invalid API key');
-    if (!res.ok) throw new Error(`Anthropic responded with ${res.status}`);
-  }
-
-  private async pingOpenRouter(apiKey: string): Promise<void> {
-    const res = await fetch('https://openrouter.ai/api/v1/models', {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (res.status === 401) throw new Error('Invalid API key');
-    if (!res.ok) throw new Error(`OpenRouter responded with ${res.status}`);
-  }
-
-  private async pingRunway(apiKey: string): Promise<void> {
-    const res = await fetch('https://api.dev.runwayml.com/v1/assets', {
-      headers: { Authorization: `Bearer ${apiKey}`, 'X-Runway-Version': '2024-11-06' },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (res.status === 401) throw new Error('Invalid API key');
-    if (!res.ok) throw new Error(`Runway responded with ${res.status}`);
-  }
-
-  private async pingElevenLabs(apiKey: string): Promise<void> {
-    const res = await fetch('https://api.elevenlabs.io/v1/user', {
-      headers: { 'xi-api-key': apiKey },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (res.status === 401) throw new Error('Invalid API key');
-    if (!res.ok) throw new Error(`ElevenLabs responded with ${res.status}`);
+  private joinUrl(base?: string | null, path?: string | null): string | null {
+    if (!base) return null;
+    if (!path) return base;
+    return `${base.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
   }
 
   private async getConnectionOwnedByTenant(tenantId: string, connectionId: string): Promise<any> {

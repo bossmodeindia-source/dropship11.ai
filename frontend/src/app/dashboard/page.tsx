@@ -27,6 +27,7 @@ const NAV_CARDS = [
   { icon: '📦', title: 'Orders',       desc: 'Manage fulfillment queue',      href: '/dashboard/orders' },
   { icon: '📊', title: 'Analytics',    desc: 'ROAS, CAC, LTV dashboards',     href: '/dashboard/analytics' },
   { icon: '🤖', title: 'AI Campaigns', desc: 'Launch and monitor ads',        href: '/dashboard/campaigns' },
+  { icon: '⚙️', title: 'AI Settings',  desc: 'Providers, models, BYOK',        href: '/dashboard/ai-settings' },
   { icon: '🔗', title: 'Integrations', desc: 'Shopify, Meta, TikTok',         href: '/dashboard/integrations' },
 ];
 
@@ -62,7 +63,11 @@ export default function DashboardPage() {
         const isAdmin = user.role === 'admin' || user.role === 'superadmin';
         const cur = summary?.currency ?? '₹';
         const cards = isAdmin
-          ? [...NAV_CARDS, { icon: '🔑', title: 'Admin Panel', desc: 'Users, keys, system', href: '/admin' }]
+          ? [
+              ...NAV_CARDS,
+              { icon: '🔑', title: 'Admin Panel', desc: 'Users, keys, system', href: '/admin' },
+              { icon: '🧠', title: 'AI Providers', desc: 'Admin provider registry', href: '/admin/ai-providers' },
+            ]
           : NAV_CARDS;
 
         return (

@@ -43,6 +43,9 @@ const makeProvider = (providerKey: string, id = `prov-${providerKey}`) => ({
   description: null,
   sdkClass: null,
   baseUrl: null,
+  healthCheckUrl: providerKey === 'custom-llm-provider'
+    ? null
+    : `https://health.test/${providerKey}`,
   docsUrl: null,
   capabilities: {},
   pricingPerUnit: null,

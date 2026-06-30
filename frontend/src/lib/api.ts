@@ -258,6 +258,113 @@ export const integrations = {
     }),
 };
 
+// â”€â”€ AI Providers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+export interface AiProvider {
+  id: string;
+  providerKey: string;
+  displayName: string;
+  category: string;
+  description?: string | null;
+  logoUrl?: string | null;
+  providerType?: string | null;
+  docsUrl?: string | null;
+  baseUrl?: string | null;
+  apiBaseUrl?: string | null;
+  supportedModels?: string[];
+  defaultModel?: string | null;
+  capabilities?: Record<string, unknown>;
+  features?: Record<string, boolean>;
+  pricingUnit?: string | null;
+  pricingPerUnit?: number | null;
+  priority?: number;
+  fallbackPriority?: number;
+  enabled?: boolean;
+  byokEnabled?: boolean;
+  healthStatus?: string;
+  status?: string;
+  apiKeyConfigured?: boolean;
+  requestsPerMinute?: number;
+  requestsPerDay?: number;
+}
+
+export interface CreateAiProviderDto {
+  providerKey: string;
+  displayName: string;
+  category: string;
+  providerType?: string;
+  logoUrl?: string;
+  description?: string;
+  apiBaseUrl?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  organizationId?: string;
+  supportedModels?: string[];
+  modelList?: string[];
+  defaultModel?: string;
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
+  timeoutMs?: number;
+  retryCount?: number;
+  costPer1KTokens?: number;
+  dailyBudget?: number;
+  monthlyBudget?: number;
+  requestsPerMinute?: number;
+  requestsPerDay?: number;
+  healthCheckUrl?: string;
+  endpointPath?: string;
+  authHeaderName?: string;
+  authHeaderTemplate?: string;
+  priority?: number;
+  fallbackPriority?: number;
+  enabled?: boolean;
+  byokEnabled?: boolean;
+  supportsStreaming?: boolean;
+  supportsVision?: boolean;
+  supportsImageGeneration?: boolean;
+  supportsFunctionCalling?: boolean;
+  supportsJsonMode?: boolean;
+  requestTemplate?: Record<string, unknown>;
+  responseMapping?: Record<string, unknown>;
+}
+
+export interface UserAiConnection {
+  id: string;
+  providerId: string;
+  providerKey: string;
+  providerDisplayName?: string;
+  connectionStatus: string;
+  isActive: boolean;
+  allowPlatformFallback: boolean;
+  quotaLimit: number | null;
+  quotaUsed: number;
+  totalRequests: number;
+  totalTokens: number;
+  totalCostUsd: number;
+}
+
+export const aiProviders = {
+  available: () => request<AiProvider[]>('/ai-providers/available'),
+};
+
+export const userAiConnections = {
+  list: () => request<UserAiConnection[]>('/user/ai-connections'),
+  connect: (providerId: string, apiKey: string, secondaryKey?: string, quotaLimit?: number) =>
+    request<UserAiConnection>('/user/ai-connections/connect', {
+      method: 'POST',
+      body: JSON.stringify({ providerId, apiKey, secondaryKey, quotaLimit }),
+    }),
+  disconnect: (connectionId: string) =>
+    request<void>(`/user/ai-connections/${connectionId}`, { method: 'DELETE' }),
+  healthCheck: (connectionId: string) =>
+    request<{ status: string; latencyMs: number | null; error?: string }>(
+      `/user/ai-connections/${connectionId}/health-check`,
+      { method: 'POST' },
+    ),
+  analytics: () => request<unknown>('/user/ai-connections/analytics'),
+};
+
 // ── Returns (V64 Return Shield) ───────────────────────────────────────────────
 
 export interface ReturnRequest {
@@ -357,4 +464,40 @@ export const adminApi = {
       body: JSON.stringify(dto),
     }),
   systemStats: () => request<unknown>('/admin/system/stats'),
+  aiProviders: () => request<AiProvider[]>('/admin/ai-providers'),
+  createAiProvider: (dto: CreateAiProviderDto) =>
+    request<AiProvider>('/admin/ai-providers', {
+      method: 'POST',
+      body: JSON.stringify(dto),
+    }),
+  updateAiProvider: (id: string, dto: Partial<CreateAiProviderDto>) =>
+    request<AiProvider>(`/admin/ai-providers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(dto),
+    }),
+  approveAiProvider: (id: string) =>
+    request<AiProvider>(`/admin/ai-providers/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ notes: 'Enabled from admin AI Providers panel' }),
+    }),
+  disableAiProvider: (id: string, reason: string) =>
+    request<{ message: string; providerId: string }>(`/admin/ai-providers/${id}/disable`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+  deleteAiProvider: (id: string) =>
+    request<{ message: string; providerId: string }>(`/admin/ai-providers/${id}`, {
+      method: 'DELETE',
+    }),
+  testAiProvider: (id: string) =>
+    request<{ status: string; latencyMs: number | null; error?: string }>(
+      `/admin/ai-providers/${id}/test`,
+      { method: 'POST' },
+    ),
+  exportAiProviders: () => request<{ exportedAt: string; providers: AiProvider[] }>('/admin/ai-providers/export'),
+  importAiProviders: (providers: CreateAiProviderDto[]) =>
+    request<{ imported: number; skipped: number }>('/admin/ai-providers/import', {
+      method: 'POST',
+      body: JSON.stringify({ providers }),
+    }),
 };
