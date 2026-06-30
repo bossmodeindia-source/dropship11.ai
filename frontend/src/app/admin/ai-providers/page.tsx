@@ -43,6 +43,8 @@ export default function AdminAiProvidersPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<CreateAiProviderDto>(blankForm);
   const [modelsText, setModelsText] = useState('');
+  const [presets, setPresets] = useState<CreateAiProviderDto[]>([]);
+  const [analytics, setAnalytics] = useState<any[]>([]);
 
   const enabledCount = useMemo(
     () => providers.filter(p => p.status === 'approved' && p.enabled !== false).length,
@@ -51,8 +53,16 @@ export default function AdminAiProvidersPage() {
 
   const load = () => {
     setLoading(true);
-    adminApi.aiProviders()
-      .then(setProviders)
+    Promise.all([
+      adminApi.aiProviders(),
+      adminApi.aiProviderPresets().catch(() => []),
+      adminApi.aiProviderAnalytics().catch(() => []),
+    ])
+      .then(([providerRows, presetRows, analyticsRows]) => {
+        setProviders(providerRows);
+        setPresets(presetRows);
+        setAnalytics(Array.isArray(analyticsRows) ? analyticsRows : []);
+      })
       .catch(() => toast.error('Failed to load AI providers'))
       .finally(() => setLoading(false));
   };
@@ -88,6 +98,13 @@ export default function AdminAiProvidersPage() {
     } catch (err) {
       toast.error((err as Error).message);
     }
+  };
+
+  const applyPreset = (providerKey: string) => {
+    const preset = presets.find(item => item.providerKey === providerKey);
+    if (!preset) return;
+    setForm({ ...blankForm, ...preset, apiKey: '', enabled: true });
+    setModelsText((preset.supportedModels ?? preset.modelList ?? []).join(', '));
   };
 
   const exportConfig = async () => {
@@ -134,6 +151,22 @@ export default function AdminAiProvidersPage() {
 
         <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-8">
           <h2 className="font-semibold mb-4">Add any AI provider</h2>
+          {presets.length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <span className="text-sm text-gray-400">Low-cost presets:</span>
+              <select
+                className="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm"
+                defaultValue=""
+                onChange={e => applyPreset(e.target.value)}
+              >
+                <option value="" disabled>Prefill provider settings</option>
+                {presets.map(preset => (
+                  <option key={preset.providerKey} value={preset.providerKey}>{preset.displayName}</option>
+                ))}
+              </select>
+              <span className="text-xs text-gray-500">Presets never include API keys.</span>
+            </div>
+          )}
           <div className="grid md:grid-cols-3 gap-3">
             <input className="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2" placeholder="Provider slug, e.g. acme-ai"
               value={form.providerKey} onChange={e => setForm({ ...form, providerKey: e.target.value })} />
@@ -149,6 +182,15 @@ export default function AdminAiProvidersPage() {
               value={form.apiBaseUrl ?? ''} onChange={e => setForm({ ...form, apiBaseUrl: e.target.value, baseUrl: e.target.value })} />
             <input className="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2" placeholder="Endpoint path"
               value={form.endpointPath ?? ''} onChange={e => setForm({ ...form, endpointPath: e.target.value })} />
+            <select className="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2"
+              value={form.authType ?? 'bearer'} onChange={e => setForm({ ...form, authType: e.target.value as CreateAiProviderDto['authType'] })}>
+              <option value="bearer">Bearer token</option>
+              <option value="x-api-key">x-api-key/header</option>
+              <option value="query-param">Query param</option>
+              <option value="none">No auth</option>
+            </select>
+            <input className="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2" placeholder="Query param name, e.g. key"
+              value={form.queryParamName ?? ''} onChange={e => setForm({ ...form, queryParamName: e.target.value })} />
             <input className="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2" placeholder="Platform API key (encrypted)"
               type="password" value={form.apiKey ?? ''} onChange={e => setForm({ ...form, apiKey: e.target.value })} />
             <input className="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2" placeholder="Default model"
@@ -161,6 +203,10 @@ export default function AdminAiProvidersPage() {
               type="number" value={form.requestsPerMinute ?? ''} onChange={e => setForm({ ...form, requestsPerMinute: Number(e.target.value) })} />
             <input className="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2" placeholder="Daily budget"
               type="number" value={form.dailyBudget ?? ''} onChange={e => setForm({ ...form, dailyBudget: Number(e.target.value) })} />
+            <input className="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2" placeholder="Daily request limit"
+              type="number" value={form.dailyRequestLimit ?? ''} onChange={e => setForm({ ...form, dailyRequestLimit: Number(e.target.value) })} />
+            <input className="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2" placeholder="Monthly request limit"
+              type="number" value={form.monthlyRequestLimit ?? ''} onChange={e => setForm({ ...form, monthlyRequestLimit: Number(e.target.value) })} />
           </div>
           <div className="flex flex-wrap gap-4 mt-4 text-sm text-gray-300">
             {[
@@ -171,6 +217,7 @@ export default function AdminAiProvidersPage() {
               ['supportsImageGeneration', 'Image generation'],
               ['supportsFunctionCalling', 'Function calling'],
               ['supportsJsonMode', 'JSON mode'],
+              ['isDefault', 'Default provider'],
             ].map(([key, label]) => (
               <label key={key} className="flex items-center gap-2">
                 <input type="checkbox" checked={Boolean((form as any)[key])}
@@ -184,6 +231,21 @@ export default function AdminAiProvidersPage() {
             {saving ? 'Saving…' : 'Create provider'}
           </button>
         </section>
+
+        {analytics.length > 0 && (
+          <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-8">
+            <h2 className="font-semibold mb-4">Usage and cost analytics</h2>
+            <div className="grid md:grid-cols-3 gap-3">
+              {analytics.slice(0, 6).map(row => (
+                <div key={row.providerKey ?? row.provider_id} className="bg-gray-950 border border-gray-800 rounded-xl p-4">
+                  <p className="text-white font-medium">{row.displayName ?? row.providerKey ?? 'Provider'}</p>
+                  <p className="text-gray-400 text-sm">Requests: {row.totalRequests ?? row.total_requests ?? 0}</p>
+                  <p className="text-gray-400 text-sm">Cost: ${Number(row.totalCostUsd ?? row.total_cost_usd ?? 0).toFixed(4)}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
@@ -210,6 +272,7 @@ export default function AdminAiProvidersPage() {
                     <tr key={provider.id}>
                       <td className="px-6 py-4">
                         <p className="font-medium">{provider.displayName}</p>
+                        {provider.isDefault && <p className="text-amber-400 text-xs mt-1">Default provider</p>}
                         <p className="text-gray-500">{provider.providerKey} · {provider.category}</p>
                       </td>
                       <td className="px-6 py-4 text-gray-400 max-w-xs truncate">
@@ -243,6 +306,8 @@ export default function AdminAiProvidersPage() {
                           </button>
                           <button onClick={() => adminApi.testAiProvider(provider.id).then(r => toast.success(`Health: ${r.status}`)).catch(e => toast.error(e.message))}
                             className="text-xs border border-gray-700 rounded px-2 py-1">Test</button>
+                          <button onClick={() => adminApi.setDefaultAiProvider(provider.id).then(load).then(() => toast.success('Default provider updated'))}
+                            className="text-xs border border-amber-700 text-amber-300 rounded px-2 py-1">Set default</button>
                           <button onClick={() => adminApi.deleteAiProvider(provider.id).then(load)}
                             className="text-xs border border-red-800 text-red-400 rounded px-2 py-1">Delete</button>
                         </div>

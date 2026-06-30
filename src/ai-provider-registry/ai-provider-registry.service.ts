@@ -76,12 +76,17 @@ export interface AiProviderCatalogEntry {
   supportsJsonMode?: boolean;
   apiFormat?: string;
   endpointPath?: string;
+  authType?: string;
+  queryParamName?: string | null;
   authHeaderName?: string;
   authHeaderTemplate?: string;
   requestTemplate?: Record<string, unknown>;
   responseMapping?: Record<string, unknown>;
   healthStatus?: string;
   apiKeyConfigured?: boolean;
+  isDefault?: boolean;
+  dailyRequestLimit?: number | null;
+  monthlyRequestLimit?: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -89,6 +94,20 @@ export interface AiProviderCatalogEntry {
 export interface AiProviderRuntimeConfig extends AiProviderCatalogEntry {
   platformApiKey: string | null;
   platformKeyAvailable: boolean;
+}
+
+export interface AiProviderPreset {
+  displayName: string;
+  providerKey: string;
+  providerType: string;
+  category: string;
+  apiBaseUrl: string;
+  endpointPath: string;
+  authType: 'bearer' | 'x-api-key' | 'query-param' | 'none';
+  authHeaderName?: string;
+  defaultModel: string;
+  supportedModels: string[];
+  notes: string;
 }
 
 @Injectable()
@@ -104,6 +123,119 @@ export class AiProviderRegistryService {
     @Inject(DB_POOL) private readonly db: Pool,
     private readonly audit: AuditService,
   ) {}
+
+  getProviderPresets(): AiProviderPreset[] {
+    return [
+      {
+        displayName: 'Gemini',
+        providerKey: 'gemini',
+        providerType: 'chat',
+        category: 'reasoning',
+        apiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        endpointPath: '/chat/completions',
+        authType: 'bearer',
+        defaultModel: 'gemini-2.0-flash',
+        supportedModels: ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+        notes: 'OpenAI-compatible Gemini endpoint; admin supplies API key.',
+      },
+      {
+        displayName: 'Groq',
+        providerKey: 'groq',
+        providerType: 'chat',
+        category: 'reasoning',
+        apiBaseUrl: 'https://api.groq.com/openai/v1',
+        endpointPath: '/chat/completions',
+        authType: 'bearer',
+        defaultModel: 'llama-3.3-70b-versatile',
+        supportedModels: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
+        notes: 'Low-latency OpenAI-compatible chat completions.',
+      },
+      {
+        displayName: 'OpenRouter',
+        providerKey: 'openrouter',
+        providerType: 'chat',
+        category: 'reasoning',
+        apiBaseUrl: 'https://openrouter.ai/api/v1',
+        endpointPath: '/chat/completions',
+        authType: 'bearer',
+        defaultModel: 'openai/gpt-4o-mini',
+        supportedModels: ['openai/gpt-4o-mini', 'meta-llama/llama-3.1-70b-instruct'],
+        notes: 'Gateway for many hosted models.',
+      },
+      {
+        displayName: 'Cerebras',
+        providerKey: 'cerebras',
+        providerType: 'chat',
+        category: 'reasoning',
+        apiBaseUrl: 'https://api.cerebras.ai/v1',
+        endpointPath: '/chat/completions',
+        authType: 'bearer',
+        defaultModel: 'llama3.1-8b',
+        supportedModels: ['llama3.1-8b', 'llama3.1-70b'],
+        notes: 'OpenAI-compatible Cerebras inference.',
+      },
+      {
+        displayName: 'Cloudflare Workers AI',
+        providerKey: 'cloudflare-workers-ai',
+        providerType: 'chat',
+        category: 'reasoning',
+        apiBaseUrl: 'https://api.cloudflare.com/client/v4/accounts/{{accountId}}/ai/v1',
+        endpointPath: '/chat/completions',
+        authType: 'bearer',
+        defaultModel: '@cf/meta/llama-3.1-8b-instruct',
+        supportedModels: ['@cf/meta/llama-3.1-8b-instruct'],
+        notes: 'Replace {{accountId}} in the base URL before saving.',
+      },
+      {
+        displayName: 'Together AI',
+        providerKey: 'together-ai',
+        providerType: 'chat',
+        category: 'reasoning',
+        apiBaseUrl: 'https://api.together.xyz/v1',
+        endpointPath: '/chat/completions',
+        authType: 'bearer',
+        defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+        supportedModels: ['meta-llama/Llama-3.3-70B-Instruct-Turbo'],
+        notes: 'OpenAI-compatible Together AI chat.',
+      },
+      {
+        displayName: 'Ollama',
+        providerKey: 'ollama',
+        providerType: 'chat',
+        category: 'reasoning',
+        apiBaseUrl: 'http://localhost:11434/v1',
+        endpointPath: '/chat/completions',
+        authType: 'none',
+        defaultModel: 'llama3.1',
+        supportedModels: ['llama3.1', 'mistral', 'qwen2.5-coder'],
+        notes: 'Local OpenAI-compatible Ollama endpoint.',
+      },
+      {
+        displayName: 'DeepSeek',
+        providerKey: 'deepseek',
+        providerType: 'chat',
+        category: 'reasoning',
+        apiBaseUrl: 'https://api.deepseek.com/v1',
+        endpointPath: '/chat/completions',
+        authType: 'bearer',
+        defaultModel: 'deepseek-chat',
+        supportedModels: ['deepseek-chat', 'deepseek-reasoner'],
+        notes: 'OpenAI-compatible DeepSeek API.',
+      },
+      {
+        displayName: 'Mistral',
+        providerKey: 'mistral',
+        providerType: 'chat',
+        category: 'reasoning',
+        apiBaseUrl: 'https://api.mistral.ai/v1',
+        endpointPath: '/chat/completions',
+        authType: 'bearer',
+        defaultModel: 'mistral-small-latest',
+        supportedModels: ['mistral-small-latest', 'mistral-large-latest'],
+        notes: 'OpenAI-compatible Mistral chat endpoint.',
+      },
+    ];
+  }
 
   // ── Admin: Create Provider ────────────────────────────────────────────────
 
@@ -134,10 +266,12 @@ export class AiProviderRegistryService {
          supports_streaming, supports_vision, supports_image_generation,
          supports_function_calling, supports_json_mode, api_format, endpoint_path,
          auth_header_name, auth_header_template, request_template, response_mapping,
-         daily_budget, monthly_budget
+         daily_budget, monthly_budget, auth_type, query_param_name,
+         daily_request_limit, monthly_request_limit, is_default
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
          $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,
-         $31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46)
+         $31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,
+         $47,$48,$49,$50,$51)
        RETURNING *`,
       [
         dto.providerKey, dto.displayName, dto.category,
@@ -181,8 +315,17 @@ export class AiProviderRegistryService {
         JSON.stringify(dto.responseMapping ?? {}),
         dto.dailyBudget ?? null,
         dto.monthlyBudget ?? null,
+        dto.authType ?? 'bearer',
+        dto.queryParamName ?? null,
+        dto.dailyRequestLimit ?? dto.requestsPerDay ?? null,
+        dto.monthlyRequestLimit ?? null,
+        dto.isDefault ?? false,
       ],
     );
+
+    if (dto.isDefault === true) {
+      await this.setDefaultProvider(result.rows[0].id, adminId);
+    }
 
     await this.auditProviderAction(
       result.rows[0].id,
@@ -313,11 +456,16 @@ export class AiProviderRegistryService {
     if (dto.apiFormat !== undefined)    { setClauses.push(`api_format = $${idx++}`); values.push(dto.apiFormat); }
     if (dto.endpointPath !== undefined) { setClauses.push(`endpoint_path = $${idx++}`); values.push(dto.endpointPath); }
     if (dto.authHeaderName !== undefined){ setClauses.push(`auth_header_name = $${idx++}`); values.push(dto.authHeaderName); }
+    if (dto.authType !== undefined)      { setClauses.push(`auth_type = $${idx++}`); values.push(dto.authType); }
+    if (dto.queryParamName !== undefined){ setClauses.push(`query_param_name = $${idx++}`); values.push(dto.queryParamName); }
     if (dto.authHeaderTemplate !== undefined){ setClauses.push(`auth_header_template = $${idx++}`); values.push(dto.authHeaderTemplate); }
     if (dto.requestTemplate !== undefined){ setClauses.push(`request_template = $${idx++}`); values.push(JSON.stringify(dto.requestTemplate)); }
     if (dto.responseMapping !== undefined){ setClauses.push(`response_mapping = $${idx++}`); values.push(JSON.stringify(dto.responseMapping)); }
     if (dto.dailyBudget !== undefined)  { setClauses.push(`daily_budget = $${idx++}`); values.push(dto.dailyBudget); }
     if (dto.monthlyBudget !== undefined){ setClauses.push(`monthly_budget = $${idx++}`); values.push(dto.monthlyBudget); }
+    if (dto.dailyRequestLimit !== undefined){ setClauses.push(`daily_request_limit = $${idx++}`); values.push(dto.dailyRequestLimit); }
+    if (dto.monthlyRequestLimit !== undefined){ setClauses.push(`monthly_request_limit = $${idx++}`); values.push(dto.monthlyRequestLimit); }
+    if (dto.isDefault !== undefined)    { setClauses.push(`is_default = $${idx++}`); values.push(dto.isDefault); }
     if (dto.apiKey !== undefined) {
       const encrypted = this.encrypt(dto.apiKey);
       setClauses.push(`encrypted_api_key = $${idx++}`); values.push(encrypted.ciphertext);
@@ -346,6 +494,29 @@ export class AiProviderRegistryService {
       result.rows[0].status,
       dto.apiKey !== undefined ? 'Provider API key rotated securely' : 'Provider metadata updated',
     );
+    if (dto.isDefault === true) {
+      await this.setDefaultProvider(providerId, adminId);
+    }
+    return this.mapRow(result.rows[0]);
+  }
+
+  async setDefaultProvider(providerId: string, adminId: string): Promise<AiProviderCatalogEntry> {
+    const provider = await this.getProviderByIdRaw(providerId);
+    if (!provider) throw new NotFoundException(`Provider ${providerId} not found`);
+    await this.db.query(
+      `UPDATE ai_provider_catalog
+       SET is_default = false, updated_at = NOW()
+       WHERE category = $1 AND id <> $2`,
+      [provider.category, providerId],
+    );
+    const result = await this.db.query(
+      `UPDATE ai_provider_catalog
+       SET is_default = true, updated_at = NOW()
+       WHERE id = $1 RETURNING *`,
+      [providerId],
+    );
+    await this.auditProviderAction(providerId, adminId, 'updated', provider.status, result.rows[0].status, 'Provider set as default');
+    this.invalidateCache();
     return this.mapRow(result.rows[0]);
   }
 
@@ -541,6 +712,43 @@ export class AiProviderRegistryService {
     }));
   }
 
+  async getProviderUsageAnalytics(days = 30): Promise<any> {
+    const result = await this.db.query(
+      `SELECT
+         e.provider_key,
+         COUNT(*)::int AS total_requests,
+         SUM(e.total_tokens)::bigint AS total_tokens,
+         COALESCE(SUM(e.cost_usd), 0)::numeric AS total_cost_usd,
+         AVG(e.latency_ms)::int AS avg_latency_ms,
+         COUNT(*) FILTER (WHERE e.success = true)::int AS success_count,
+         COUNT(*) FILTER (WHERE e.success = false)::int AS failure_count,
+         MAX(e.created_at) AS last_used_at
+       FROM user_ai_usage_events e
+       WHERE e.created_at > NOW() - ($1 || ' days')::INTERVAL
+       GROUP BY e.provider_key
+       ORDER BY total_requests DESC`,
+      [days],
+    );
+
+    return {
+      period: `${days}d`,
+      providers: result.rows.map((row: any) => {
+        const total = Number(row.total_requests ?? 0);
+        const failures = Number(row.failure_count ?? 0);
+        return {
+          providerKey: row.provider_key,
+          requests: total,
+          tokens: Number(row.total_tokens ?? 0),
+          costUsd: Number(row.total_cost_usd ?? 0),
+          avgLatencyMs: Number(row.avg_latency_ms ?? 0),
+          successRate: total > 0 ? (total - failures) / total : 0,
+          failureRate: total > 0 ? failures / total : 0,
+          lastUsedAt: row.last_used_at,
+        };
+      }),
+    };
+  }
+
   // ── Private Helpers ───────────────────────────────────────────────────────
 
   private async getProviderByIdRaw(id: string): Promise<any | null> {
@@ -706,12 +914,17 @@ export class AiProviderRegistryService {
       supportsJsonMode:     row.supports_json_mode ?? Boolean(row.capabilities?.supportsJsonMode),
       apiFormat:            row.api_format ?? 'openai_compatible',
       endpointPath:         row.endpoint_path ?? '/chat/completions',
+      authType:             row.auth_type ?? 'bearer',
+      queryParamName:       row.query_param_name ?? null,
       authHeaderName:       row.auth_header_name ?? 'Authorization',
       authHeaderTemplate:   row.auth_header_template ?? 'Bearer {{apiKey}}',
       requestTemplate:      this.json<Record<string, unknown>>(row.request_template, {}),
       responseMapping:      this.json<Record<string, unknown>>(row.response_mapping, {}),
       healthStatus:         row.health_status ?? 'unknown',
       apiKeyConfigured:     Boolean(row.encrypted_api_key),
+      isDefault:            Boolean(row.is_default),
+      dailyRequestLimit:    row.daily_request_limit ? Number(row.daily_request_limit) : null,
+      monthlyRequestLimit:  row.monthly_request_limit ? Number(row.monthly_request_limit) : null,
       createdAt:            row.created_at,
       updatedAt:            row.updated_at,
     };

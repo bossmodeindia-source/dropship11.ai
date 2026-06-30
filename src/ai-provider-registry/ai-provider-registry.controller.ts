@@ -8,7 +8,7 @@
 import {
   Controller, Get, Post, Patch, Delete,
   Param, Body, UseGuards, Request,
-  ParseUUIDPipe, HttpCode, HttpStatus,
+  ParseUUIDPipe, HttpCode, HttpStatus, Query,
 } from '@nestjs/common';
 import { AiProviderRegistryService } from './ai-provider-registry.service';
 import {
@@ -32,6 +32,16 @@ export class AiProviderRegistryController {
   @Get()
   async listAll() {
     return this.registry.listAllProviders();
+  }
+
+  @Get('presets')
+  async presets() {
+    return this.registry.getProviderPresets();
+  }
+
+  @Get('analytics')
+  async analytics(@Query('days') days?: string) {
+    return this.registry.getProviderUsageAnalytics(days ? parseInt(days) : 30);
   }
 
   /** Create a new provider (status: pending until approved) */
@@ -97,6 +107,15 @@ export class AiProviderRegistryController {
     return this.registry.testProviderConnectivity(id, req.user.id);
   }
 
+  @Post(':id/default')
+  @HttpCode(HttpStatus.OK)
+  async setDefaultProvider(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req: any,
+  ) {
+    return this.registry.setDefaultProvider(id, req.user.id);
+  }
+
   /** Export provider metadata; platform API keys are never exported */
   @Get('export')
   async exportProviders(@Request() req: any) {
@@ -145,6 +164,10 @@ export class AiProviderPublicController {
       capabilities:         p.capabilities,
       supportedModels:      p.supportedModels,
       defaultModel:         p.defaultModel,
+      isDefault:            p.isDefault,
+      authType:             p.authType,
+      dailyRequestLimit:    p.dailyRequestLimit,
+      monthlyRequestLimit:  p.monthlyRequestLimit,
       features: {
         streaming:          p.supportsStreaming,
         vision:             p.supportsVision,

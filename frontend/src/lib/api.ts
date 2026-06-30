@@ -286,6 +286,11 @@ export interface AiProvider {
   apiKeyConfigured?: boolean;
   requestsPerMinute?: number;
   requestsPerDay?: number;
+  dailyRequestLimit?: number | null;
+  monthlyRequestLimit?: number | null;
+  authType?: 'bearer' | 'x-api-key' | 'query-param' | 'none';
+  queryParamName?: string | null;
+  isDefault?: boolean;
 }
 
 export interface CreateAiProviderDto {
@@ -312,6 +317,11 @@ export interface CreateAiProviderDto {
   monthlyBudget?: number;
   requestsPerMinute?: number;
   requestsPerDay?: number;
+  dailyRequestLimit?: number;
+  monthlyRequestLimit?: number;
+  authType?: 'bearer' | 'x-api-key' | 'query-param' | 'none';
+  queryParamName?: string;
+  isDefault?: boolean;
   healthCheckUrl?: string;
   endpointPath?: string;
   authHeaderName?: string;
@@ -344,6 +354,15 @@ export interface UserAiConnection {
   totalCostUsd: number;
 }
 
+export interface UserAiProviderPreference {
+  category: string;
+  providerId: string;
+  providerKey: string;
+  providerDisplayName: string;
+  model: string | null;
+  useByok: boolean;
+}
+
 export const aiProviders = {
   available: () => request<AiProvider[]>('/ai-providers/available'),
 };
@@ -363,6 +382,12 @@ export const userAiConnections = {
       { method: 'POST' },
     ),
   analytics: () => request<unknown>('/user/ai-connections/analytics'),
+  preferences: () => request<UserAiProviderPreference[]>('/user/ai-connections/preferences'),
+  setPreference: (category: string, providerId: string, model?: string, useByok = false) =>
+    request<UserAiProviderPreference>('/user/ai-connections/preferences', {
+      method: 'POST',
+      body: JSON.stringify({ category, providerId, model, useByok }),
+    }),
 };
 
 // ── Returns (V64 Return Shield) ───────────────────────────────────────────────
@@ -465,6 +490,8 @@ export const adminApi = {
     }),
   systemStats: () => request<unknown>('/admin/system/stats'),
   aiProviders: () => request<AiProvider[]>('/admin/ai-providers'),
+  aiProviderPresets: () => request<CreateAiProviderDto[]>('/admin/ai-providers/presets'),
+  aiProviderAnalytics: (days = 30) => request<unknown>(`/admin/ai-providers/analytics?days=${days}`),
   createAiProvider: (dto: CreateAiProviderDto) =>
     request<AiProvider>('/admin/ai-providers', {
       method: 'POST',
@@ -494,6 +521,10 @@ export const adminApi = {
       `/admin/ai-providers/${id}/test`,
       { method: 'POST' },
     ),
+  setDefaultAiProvider: (id: string) =>
+    request<AiProvider>(`/admin/ai-providers/${id}/default`, {
+      method: 'POST',
+    }),
   exportAiProviders: () => request<{ exportedAt: string; providers: AiProvider[] }>('/admin/ai-providers/export'),
   importAiProviders: (providers: CreateAiProviderDto[]) =>
     request<{ imported: number; skipped: number }>('/admin/ai-providers/import', {

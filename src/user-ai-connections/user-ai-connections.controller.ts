@@ -12,7 +12,7 @@ import {
   ParseUUIDPipe, HttpCode, HttpStatus, Query,
 } from '@nestjs/common';
 import { UserAiConnectionsService } from './user-ai-connections.service';
-import { ConnectProviderDto } from './dto/user-ai-connections.dto';
+import { ConnectProviderDto, SetAiProviderPreferenceDto } from './dto/user-ai-connections.dto';
 import { JwtAuthGuard } from '../common/guards';
 
 @Controller('api/v1/user/ai-connections')
@@ -71,5 +71,19 @@ export class UserAiConnectionsController {
     @Query('days') days?: string,
   ) {
     return this.service.getUsageAnalytics(req.user.tenantId, days ? parseInt(days) : 30);
+  }
+
+  @Get('preferences')
+  async getPreferences(@Request() req: any) {
+    return this.service.getProviderPreferences(req.user.tenantId);
+  }
+
+  @Post('preferences')
+  @HttpCode(HttpStatus.OK)
+  async setPreference(
+    @Body() dto: SetAiProviderPreferenceDto,
+    @Request() req: any,
+  ) {
+    return this.service.setProviderPreference(req.user.tenantId, dto);
   }
 }

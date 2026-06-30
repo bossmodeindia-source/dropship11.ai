@@ -27,7 +27,7 @@ import * as crypto from 'crypto';
 import { DB_POOL } from '../common/database/database.module';
 import { AiProviderRegistryService } from '../ai-provider-registry/ai-provider-registry.service';
 import { AuditService } from '../audit/audit.service';
-import { ConnectProviderDto, UpdateConnectionDto } from './dto/user-ai-connections.dto';
+import { ConnectProviderDto, UpdateConnectionDto, SetAiProviderPreferenceDto } from './dto/user-ai-connections.dto';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LEN    = 12;
@@ -336,6 +336,78 @@ export class UserAiConnectionsService {
       period: `${days}d`,
       byProvider: result.rows,
     };
+  }
+
+  async setProviderPreference(
+    tenantId: string,
+    dto: SetAiProviderPreferenceDto,
+  ): Promise<{ category: string; providerId: string; model: string | null; useByok: boolean }> {
+    const provider = await this.registry.assertProviderApproved(dto.providerId);
+    if (provider.category !== dto.category) {
+      throw new ForbiddenException(
+        `Provider '${provider.displayName}' is not available for category '${dto.category}'.`,
+      );
+    }
+
+    await this.db.query(
+      `INSERT INTO user_ai_provider_preferences (
+         tenant_id, category, provider_id, provider_key, model, use_byok
+       ) VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (tenant_id, category) DO UPDATE SET
+         provider_id = EXCLUDED.provider_id,
+         provider_key = EXCLUDED.provider_key,
+         model = EXCLUDED.model,
+         use_byok = EXCLUDED.use_byok,
+         updated_at = NOW()`,
+      [
+        tenantId,
+        dto.category,
+        dto.providerId,
+        provider.providerKey,
+        dto.model ?? provider.defaultModel ?? null,
+        dto.useByok ?? false,
+      ],
+    );
+
+    this.audit.log({
+      tenantId,
+      actorId: tenantId,
+      action: 'user_ai_preference.updated',
+      resource: 'user_ai_provider_preferences',
+      details: {
+        category: dto.category,
+        providerKey: provider.providerKey,
+        model: dto.model ?? provider.defaultModel ?? null,
+        useByok: dto.useByok ?? false,
+      },
+    });
+
+    return {
+      category: dto.category,
+      providerId: dto.providerId,
+      model: dto.model ?? provider.defaultModel ?? null,
+      useByok: dto.useByok ?? false,
+    };
+  }
+
+  async getProviderPreferences(tenantId: string): Promise<any[]> {
+    const result = await this.db.query(
+      `SELECT pref.category, pref.provider_id, pref.provider_key, pref.model, pref.use_byok,
+              p.display_name, p.default_model
+       FROM user_ai_provider_preferences pref
+       LEFT JOIN ai_provider_catalog p ON p.id = pref.provider_id
+       WHERE pref.tenant_id = $1
+       ORDER BY pref.category ASC`,
+      [tenantId],
+    );
+    return result.rows.map((row: any) => ({
+      category: row.category,
+      providerId: row.provider_id,
+      providerKey: row.provider_key,
+      displayName: row.display_name,
+      model: row.model ?? row.default_model,
+      useByok: row.use_byok,
+    }));
   }
 
   // ── Crypto helpers ────────────────────────────────────────────────────────

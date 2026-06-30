@@ -8,6 +8,7 @@ import {
   userAiConnections,
   AiProvider,
   UserAiConnection,
+  UserAiProviderPreference,
 } from '@/lib/api';
 
 function featureList(provider: AiProvider) {
@@ -20,6 +21,8 @@ function featureList(provider: AiProvider) {
 export default function AiSettingsPage() {
   const [providers, setProviders] = useState<AiProvider[]>([]);
   const [connections, setConnections] = useState<UserAiConnection[]>([]);
+  const [preferences, setPreferences] = useState<UserAiProviderPreference[]>([]);
+  const [usage, setUsage] = useState<any>(null);
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
@@ -28,15 +31,24 @@ export default function AiSettingsPage() {
     [connections],
   );
 
+  const preferenceByCategory = useMemo(
+    () => new Map(preferences.map(preference => [preference.category, preference])),
+    [preferences],
+  );
+
   const load = async () => {
     setLoading(true);
     try {
-      const [available, connected] = await Promise.all([
+      const [available, connected, preferenceRows, usageRows] = await Promise.all([
         aiProviders.available(),
         userAiConnections.list(),
+        userAiConnections.preferences().catch(() => []),
+        userAiConnections.analytics().catch(() => null),
       ]);
       setProviders(available);
       setConnections(connected);
+      setPreferences(preferenceRows);
+      setUsage(usageRows);
     } catch {
       toast.error('Failed to load AI settings');
     } finally {
@@ -70,6 +82,30 @@ export default function AiSettingsPage() {
     load();
   };
 
+  const setDefaultProvider = async (provider: AiProvider, useByok: boolean) => {
+    try {
+      await userAiConnections.setPreference(
+        provider.category,
+        provider.id,
+        provider.defaultModel ?? provider.supportedModels?.[0],
+        useByok,
+      );
+      toast.success(`${provider.displayName} selected for ${provider.category}`);
+      load();
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
+  const testConnection = async (connection: UserAiConnection) => {
+    try {
+      const result = await userAiConnections.healthCheck(connection.id);
+      toast.success(`Health: ${result.status}${result.latencyMs ? ` (${result.latencyMs}ms)` : ''}`);
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
   return (
     <DashboardShell>
       {() => (
@@ -80,6 +116,23 @@ export default function AiSettingsPage() {
               Enabled providers are controlled by admins. Platform keys stay hidden; BYOK is optional when allowed.
             </p>
           </div>
+
+          {usage && (
+            <div className="grid sm:grid-cols-3 gap-4 mb-6">
+              <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+                <p className="text-gray-500 text-xs">AI requests</p>
+                <p className="text-2xl text-white font-semibold">{usage.totalRequests ?? usage.total_requests ?? 0}</p>
+              </div>
+              <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+                <p className="text-gray-500 text-xs">Tokens used</p>
+                <p className="text-2xl text-white font-semibold">{usage.totalTokens ?? usage.total_tokens ?? 0}</p>
+              </div>
+              <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+                <p className="text-gray-500 text-xs">Estimated cost</p>
+                <p className="text-2xl text-white font-semibold">${Number(usage.totalCostUsd ?? usage.total_cost_usd ?? 0).toFixed(4)}</p>
+              </div>
+            </div>
+          )}
 
           {loading ? (
             <div className="grid sm:grid-cols-2 gap-4">
@@ -97,6 +150,8 @@ export default function AiSettingsPage() {
             <div className="grid lg:grid-cols-2 gap-4">
               {providers.map(provider => {
                 const connection = connectionByProvider.get(provider.id);
+                const preference = preferenceByCategory.get(provider.category);
+                const selected = preference?.providerId === provider.id;
                 const features = featureList(provider);
                 return (
                   <div key={provider.id} className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
@@ -119,6 +174,11 @@ export default function AiSettingsPage() {
                           }`}>
                             {connection ? 'Using my key' : 'Platform key'}
                           </span>
+                          {selected && (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-amber-900/30 text-amber-300">
+                              Selected default
+                            </span>
+                          )}
                         </div>
                         <p className="text-gray-500 text-sm mt-1">{provider.description ?? 'Admin-enabled AI provider'}</p>
                       </div>
@@ -137,6 +197,23 @@ export default function AiSettingsPage() {
                         <p className="text-gray-500 text-xs mb-1">Status</p>
                         <p className="text-gray-300">{provider.status ?? 'available'}</p>
                       </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button
+                        onClick={() => setDefaultProvider(provider, false)}
+                        className="text-sm border border-gray-700 rounded-lg px-3 py-2 text-gray-200 hover:border-indigo-500"
+                      >
+                        Use Platform API Key
+                      </button>
+                      {connection && (
+                        <button
+                          onClick={() => setDefaultProvider(provider, true)}
+                          className="text-sm border border-green-800 text-green-300 rounded-lg px-3 py-2"
+                        >
+                          Use My API Key
+                        </button>
+                      )}
                     </div>
 
                     {features.length > 0 && (
@@ -163,6 +240,10 @@ export default function AiSettingsPage() {
                             <button onClick={() => disconnect(connection)}
                               className="text-sm border border-red-800 text-red-400 rounded-lg px-3 py-2">
                               Remove my key
+                            </button>
+                            <button onClick={() => testConnection(connection)}
+                              className="text-sm border border-gray-700 text-gray-200 rounded-lg px-3 py-2">
+                              Test my key
                             </button>
                           </div>
                         ) : (

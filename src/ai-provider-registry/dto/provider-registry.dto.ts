@@ -11,6 +11,10 @@ export const AI_PROVIDER_CATEGORIES = [
   'reasoning','image_generation','video_generation','voice','embedding','multimodal',
 ] as const;
 
+export const AI_PROVIDER_AUTH_TYPES = [
+  'bearer', 'x-api-key', 'query-param', 'none',
+] as const;
+
 export class CreateProviderDto {
   @IsString() @MinLength(2) @MaxLength(50)
   providerKey: string;
@@ -108,6 +112,12 @@ export class CreateProviderDto {
   @IsOptional() @IsNumber()
   requestsPerDay?: number;
 
+  @IsOptional() @IsNumber()
+  dailyRequestLimit?: number;
+
+  @IsOptional() @IsNumber()
+  monthlyRequestLimit?: number;
+
   @IsOptional() @IsObject()
   quotas?: Record<string, unknown>;
 
@@ -125,6 +135,9 @@ export class CreateProviderDto {
 
   @IsOptional() @IsBoolean()
   enabled?: boolean;
+
+  @IsOptional() @IsBoolean()
+  isDefault?: boolean;
 
   @IsOptional() @IsBoolean()
   byokEnabled?: boolean;
@@ -152,6 +165,12 @@ export class CreateProviderDto {
 
   @IsOptional() @IsString()
   authHeaderName?: string;
+
+  @IsOptional() @IsIn(AI_PROVIDER_AUTH_TYPES)
+  authType?: string;
+
+  @IsOptional() @IsString()
+  queryParamName?: string;
 
   @IsOptional() @IsString()
   authHeaderTemplate?: string;
@@ -248,6 +267,12 @@ export class UpdateProviderDto {
   @IsOptional() @IsNumber()
   requestsPerDay?: number;
 
+  @IsOptional() @IsNumber()
+  dailyRequestLimit?: number;
+
+  @IsOptional() @IsNumber()
+  monthlyRequestLimit?: number;
+
   @IsOptional() @IsObject()
   quotas?: Record<string, unknown>;
 
@@ -265,6 +290,9 @@ export class UpdateProviderDto {
 
   @IsOptional() @IsBoolean()
   enabled?: boolean;
+
+  @IsOptional() @IsBoolean()
+  isDefault?: boolean;
 
   @IsOptional() @IsBoolean()
   byokEnabled?: boolean;
@@ -292,6 +320,12 @@ export class UpdateProviderDto {
 
   @IsOptional() @IsString()
   authHeaderName?: string;
+
+  @IsOptional() @IsIn(AI_PROVIDER_AUTH_TYPES)
+  authType?: string;
+
+  @IsOptional() @IsString()
+  queryParamName?: string;
 
   @IsOptional() @IsString()
   authHeaderTemplate?: string;

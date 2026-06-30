@@ -12,7 +12,6 @@ import {
   Injectable,
   Logger,
   Optional,
-  ServiceUnavailableException,
 } from '@nestjs/common';
 import { Pool } from 'pg';
 import { DB_POOL } from '../common/database/database.module';
@@ -135,9 +134,7 @@ export class UserAiRouterService {
       }
     }
 
-    throw new ServiceUnavailableException(
-      `All AI providers failed for category '${req.category}'. Last error: ${lastError?.message}`,
-    );
+    return this.safeDegradedResponse(req, lastError);
   }
 
   private async buildProviderCandidates(req: UserAiRequest): Promise<ProviderCandidate[]> {
@@ -150,7 +147,12 @@ export class UserAiRouterService {
        )
        SELECT p.provider_key,
               c.id AS connection_id,
-              p.id = (SELECT provider_id FROM user_pref) AS selected_by_user
+              p.id = (SELECT provider_id FROM user_pref) AS selected_by_user,
+              p.is_default,
+              COALESCE(p.daily_request_limit, (p.rate_limits->>'requestsPerDay')::bigint) AS daily_request_limit,
+              p.monthly_request_limit,
+              COALESCE(day_usage.requests_today, 0)::bigint AS requests_today,
+              COALESCE(month_usage.requests_month, 0)::bigint AS requests_month
        FROM ai_provider_catalog p
        LEFT JOIN user_ai_provider_connections c
          ON c.provider_id = p.id
@@ -158,12 +160,35 @@ export class UserAiRouterService {
         AND c.is_active = true
         AND c.connection_status = 'active'
         AND (c.quota_limit IS NULL OR c.quota_used < c.quota_limit)
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*) AS requests_today
+         FROM user_ai_usage_events e
+         WHERE e.tenant_id = $1
+           AND e.provider_key = p.provider_key
+           AND e.created_at >= date_trunc('day', NOW())
+       ) day_usage ON true
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*) AS requests_month
+         FROM user_ai_usage_events e
+         WHERE e.tenant_id = $1
+           AND e.provider_key = p.provider_key
+           AND e.created_at >= date_trunc('month', NOW())
+       ) month_usage ON true
        WHERE p.status = 'approved'
          AND COALESCE(p.is_enabled, true) = true
          AND p.category = $2
          AND COALESCE(p.health_status, 'unknown') <> 'down'
+         AND (
+           COALESCE(p.daily_request_limit, (p.rate_limits->>'requestsPerDay')::bigint) IS NULL
+           OR COALESCE(day_usage.requests_today, 0) < COALESCE(p.daily_request_limit, (p.rate_limits->>'requestsPerDay')::bigint)
+         )
+         AND (
+           p.monthly_request_limit IS NULL
+           OR COALESCE(month_usage.requests_month, 0) < p.monthly_request_limit
+         )
        ORDER BY selected_by_user DESC,
                 CASE WHEN p.provider_key = $3 THEN 0 ELSE 1 END,
+                p.is_default DESC,
                 COALESCE(p.priority, p.sort_order, 100) ASC,
                 COALESCE(p.fallback_priority, p.sort_order, 100) ASC,
                 c.total_requests ASC NULLS LAST,
@@ -236,16 +261,43 @@ export class UserAiRouterService {
       supportsJsonMode: true,
       apiFormat: 'openai_compatible',
       endpointPath: '/chat/completions',
+      authType: row.auth_type ?? 'bearer',
+      queryParamName: row.query_param_name ?? null,
       authHeaderName: 'Authorization',
       authHeaderTemplate: 'Bearer {{apiKey}}',
       requestTemplate: {},
       responseMapping: {},
       healthStatus: 'unknown',
       apiKeyConfigured: false,
+      isDefault: Boolean(row.is_default),
+      dailyRequestLimit: row.daily_request_limit ? Number(row.daily_request_limit) : null,
+      monthlyRequestLimit: row.monthly_request_limit ? Number(row.monthly_request_limit) : null,
       platformApiKey: null,
       platformKeyAvailable: false,
       createdAt: new Date(),
       updatedAt: new Date(),
+    };
+  }
+
+  private safeDegradedResponse(req: UserAiRequest, lastError: Error | null): UserAiResponse {
+    this.logger.warn(
+      `[UserAI] Safe degraded response for tenant ${req.tenantId}, category=${req.category}: ${lastError?.message ?? 'no provider available'}`,
+    );
+    return {
+      providerKey: 'degraded',
+      content: 'AI providers are temporarily unavailable. Please try again shortly.',
+      rawResponse: {
+        degraded: true,
+        reason: lastError?.message ?? 'all providers unavailable',
+      },
+      usage: {
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        costUsd: 0,
+      },
+      latencyMs: 0,
+      usedFallback: true,
     };
   }
 
@@ -271,15 +323,16 @@ export class UserAiRouterService {
     rawResponse?: unknown;
     usage: { promptTokens: number; completionTokens: number; totalTokens: number; costUsd: number };
   }> {
-    const endpoint = this.joinUrl(
+    const baseEndpoint = this.joinUrl(
       ctx.provider.apiBaseUrl ?? ctx.provider.baseUrl,
       ctx.provider.endpointPath ?? '/chat/completions',
     );
-    if (!endpoint) throw new Error(`Provider '${providerKey}' has no API base URL`);
+    if (!baseEndpoint) throw new Error(`Provider '${providerKey}' has no API base URL`);
 
     const model = ctx.request.model ?? ctx.provider.defaultModel ?? ctx.provider.supportedModels?.[0];
     const body = this.buildRequestBody(ctx, model);
     const headers = this.buildHeaders(ctx);
+    const endpoint = this.applyQueryParamAuth(baseEndpoint, ctx);
     const timeoutMs = Number(ctx.provider.generationDefaults?.timeoutMs ?? 60_000);
 
     const res = await fetch(endpoint, {
@@ -337,11 +390,26 @@ export class UserAiRouterService {
 
   private buildHeaders(ctx: ProviderCallContext): Record<string, string> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const authType = ctx.provider.authType ?? 'bearer';
+    if (authType === 'none' || authType === 'query-param') return headers;
+
+    if (authType === 'x-api-key') {
+      headers[ctx.provider.authHeaderName ?? 'x-api-key'] = ctx.apiKey;
+      return headers;
+    }
+
     const headerName = ctx.provider.authHeaderName ?? 'Authorization';
     headers[headerName] = (ctx.provider.authHeaderTemplate ?? 'Bearer {{apiKey}}')
       .replace('{{apiKey}}', ctx.apiKey)
       .replace('{{secondaryKey}}', ctx.secondaryKey ?? '');
     return headers;
+  }
+
+  private applyQueryParamAuth(endpoint: string, ctx: ProviderCallContext): string {
+    if (ctx.provider.authType !== 'query-param') return endpoint;
+    const url = new URL(endpoint);
+    url.searchParams.set(ctx.provider.queryParamName ?? 'key', ctx.apiKey);
+    return url.toString();
   }
 
   private buildRequestBody(ctx: ProviderCallContext, model?: string): Record<string, unknown> {

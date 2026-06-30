@@ -201,7 +201,7 @@ describe('UserAiRouterService', () => {
       expect(callCount).toBe(2);
     });
 
-    it('throws the last error when all candidates fail', async () => {
+    it('returns a safe degraded response when all candidates fail', async () => {
       dbMock = makeMockDb([
         makeProviderRow({ provider_key: 'openai' }),
         makeProviderRow({ provider_key: 'claude' }),
@@ -212,7 +212,11 @@ describe('UserAiRouterService', () => {
         new Error('All providers down'),
       );
 
-      await expect(service.route(makeRequest())).rejects.toThrow('All providers down');
+      const response = await service.route(makeRequest());
+
+      expect(response.providerKey).toBe('degraded');
+      expect(response.usedFallback).toBe(true);
+      expect(response.content).toContain('temporarily unavailable');
     });
   });
 
@@ -246,6 +250,8 @@ describe('UserAiRouterService', () => {
 
       const [sql] = dbMock.query.mock.calls[0];
       expect(sql).toContain('quota_used < c.quota_limit');
+      expect(sql).toContain('daily_request_limit');
+      expect(sql).toContain('monthly_request_limit');
     });
   });
 
