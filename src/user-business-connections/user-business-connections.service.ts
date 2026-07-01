@@ -24,6 +24,7 @@ import {
   NotFoundException,
   ConflictException,
   Inject,
+  BadRequestException,
 } from '@nestjs/common';
 import { Pool } from 'pg';
 import * as crypto from 'crypto';
@@ -31,7 +32,10 @@ import { DB_POOL } from '../common/database/database.module';
 import { AuditService } from '../audit/audit.service';
 import {
   ConnectBusinessAccountDto,
+  ConnectWebsitePlatformDto,
+  CreateWebsitePlatformDto,
   SupportedPlatform,
+  UpdateWebsitePlatformDto,
 } from './dto/user-business-connections.dto';
 
 const ALGO   = 'aes-256-gcm';
@@ -52,6 +56,49 @@ export interface BusinessConnection {
   // NOTE: No token fields ever returned
 }
 
+export interface WebsitePlatform {
+  id: string;
+  name: string;
+  slug: string;
+  logoUrl: string | null;
+  description: string | null;
+  category: string;
+  authType: string;
+  apiBaseUrl: string | null;
+  oauthUrl: string | null;
+  tokenUrl: string | null;
+  redirectUrl: string | null;
+  scopes: string[];
+  requiredFields: Array<Record<string, unknown>>;
+  apiVersion: string | null;
+  healthEndpoint: string | null;
+  documentationUrl: string | null;
+  supportedFeatures: Record<string, boolean>;
+  connectionWizard: Record<string, unknown>;
+  enabled: boolean;
+  maintenanceMode: boolean;
+  isDefault: boolean;
+  priority: number;
+  fallbackPriority: number;
+  connectionStatus?: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+export interface UserPlatformConnection {
+  id: string;
+  tenantId: string;
+  platformId: string;
+  platformSlug: string;
+  platformName: string;
+  accountLabel: string | null;
+  connectionStatus: string;
+  isActive: boolean;
+  lastValidatedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 @Injectable()
 export class UserBusinessConnectionsService {
   private readonly logger = new Logger(UserBusinessConnectionsService.name);
@@ -60,6 +107,292 @@ export class UserBusinessConnectionsService {
     @Inject(DB_POOL) private readonly db: Pool,
     private readonly audit: AuditService,
   ) {}
+
+  getWebsitePlatformPresets(): Array<CreateWebsitePlatformDto & { presetKey: string }> {
+    const featureSet = {
+      productSync: true, inventorySync: true, orderSync: true, customerSync: true,
+      shippingSync: true, trackingSync: true, returns: true, coupons: true,
+      discounts: true, collections: true, blogs: false, pages: false, analytics: true,
+      subscriptions: false, multiStore: true, multiUser: true, webhooks: true,
+      graphql: false, rest: true, bulkImport: true, bulkExport: true, customApps: true,
+    };
+    return [
+      ['Shopify', 'shopify', 'ecommerce', 'bearer_token', 'https://{{store}}.myshopify.com/admin/api/{{apiVersion}}'],
+      ['WooCommerce', 'woocommerce', 'ecommerce', 'api_key', 'https://{{site}}/wp-json/wc/v3'],
+      ['BigCommerce', 'bigcommerce', 'ecommerce', 'bearer_token', 'https://api.bigcommerce.com/stores/{{storeHash}}/v3'],
+      ['Magento', 'magento', 'ecommerce', 'bearer_token', 'https://{{site}}/rest/V1'],
+      ['Wix', 'wix', 'cms', 'oauth2', 'https://www.wixapis.com'],
+      ['Squarespace', 'squarespace', 'cms', 'api_key', 'https://api.squarespace.com/1.0'],
+      ['OpenCart', 'opencart', 'ecommerce', 'api_key', 'https://{{site}}/index.php?route=api'],
+      ['PrestaShop', 'prestashop', 'ecommerce', 'api_key', 'https://{{site}}/api'],
+      ['Ecwid', 'ecwid', 'ecommerce', 'bearer_token', 'https://app.ecwid.com/api/v3/{{storeId}}'],
+      ['Amazon', 'amazon', 'marketplace', 'oauth2', 'https://sellingpartnerapi-na.amazon.com'],
+      ['eBay', 'ebay', 'marketplace', 'oauth2', 'https://api.ebay.com'],
+      ['Flipkart', 'flipkart', 'marketplace', 'oauth2', 'https://api.flipkart.net/sellers'],
+      ['Etsy', 'etsy', 'marketplace', 'oauth2', 'https://openapi.etsy.com/v3'],
+      ['TikTok Shop', 'tiktok-shop', 'marketplace', 'oauth2', 'https://open-api.tiktokglobalshop.com'],
+      ['Meesho', 'meesho', 'marketplace', 'api_key', 'https://api.meesho.com'],
+      ['Custom Website', 'custom-website', 'custom_website', 'custom', 'https://{{site}}'],
+    ].map(([name, slug, category, authType, apiBaseUrl]) => ({
+      presetKey: String(slug),
+      name: String(name),
+      slug: String(slug),
+      category: category as CreateWebsitePlatformDto['category'],
+      authType: authType as CreateWebsitePlatformDto['authType'],
+      apiBaseUrl: String(apiBaseUrl),
+      requiredFields: this.defaultRequiredFields(String(slug), String(authType)),
+      supportedFeatures: { ...featureSet, graphql: String(slug) === 'shopify' || String(slug) === 'custom-website' },
+      connectionWizard: { mode: 'dynamic', steps: ['credentials', 'validate', 'webhooks'] },
+      enabled: false,
+      maintenanceMode: false,
+      priority: 100,
+      fallbackPriority: 100,
+      documentationUrl: null as any,
+    }));
+  }
+
+  async listWebsitePlatforms(includeDisabled = true): Promise<WebsitePlatform[]> {
+    const result = await this.db.query(
+      `SELECT * FROM website_platforms
+       WHERE ($1::boolean = true OR enabled = true)
+       ORDER BY priority ASC, fallback_priority ASC, name ASC`,
+      [includeDisabled],
+    );
+    return result.rows.map(row => this.mapPlatformRow(row));
+  }
+
+  async listEnabledWebsitePlatforms(): Promise<WebsitePlatform[]> {
+    return this.listWebsitePlatforms(false);
+  }
+
+  async createWebsitePlatform(dto: CreateWebsitePlatformDto, adminId: string): Promise<WebsitePlatform> {
+    const webhookSecret = dto.webhookSecret ? this.encrypt(dto.webhookSecret) : null;
+    const result = await this.db.query(
+      `INSERT INTO website_platforms (
+         name, slug, logo_url, description, category, auth_type, api_base_url,
+         oauth_url, token_url, redirect_url, scopes, required_fields,
+         webhook_secret_ciphertext, webhook_secret_iv, webhook_secret_auth_tag,
+         api_version, health_endpoint, documentation_url, supported_features,
+         connection_wizard, enabled, maintenance_mode, is_default, priority, fallback_priority
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+       ON CONFLICT (slug) DO UPDATE SET
+         name = EXCLUDED.name,
+         logo_url = EXCLUDED.logo_url,
+         description = EXCLUDED.description,
+         category = EXCLUDED.category,
+         auth_type = EXCLUDED.auth_type,
+         api_base_url = EXCLUDED.api_base_url,
+         oauth_url = EXCLUDED.oauth_url,
+         token_url = EXCLUDED.token_url,
+         redirect_url = EXCLUDED.redirect_url,
+         scopes = EXCLUDED.scopes,
+         required_fields = EXCLUDED.required_fields,
+         webhook_secret_ciphertext = COALESCE(EXCLUDED.webhook_secret_ciphertext, website_platforms.webhook_secret_ciphertext),
+         webhook_secret_iv = COALESCE(EXCLUDED.webhook_secret_iv, website_platforms.webhook_secret_iv),
+         webhook_secret_auth_tag = COALESCE(EXCLUDED.webhook_secret_auth_tag, website_platforms.webhook_secret_auth_tag),
+         api_version = EXCLUDED.api_version,
+         health_endpoint = EXCLUDED.health_endpoint,
+         documentation_url = EXCLUDED.documentation_url,
+         supported_features = EXCLUDED.supported_features,
+         connection_wizard = EXCLUDED.connection_wizard,
+         enabled = EXCLUDED.enabled,
+         maintenance_mode = EXCLUDED.maintenance_mode,
+         is_default = EXCLUDED.is_default,
+         priority = EXCLUDED.priority,
+         fallback_priority = EXCLUDED.fallback_priority,
+         updated_at = NOW()
+       RETURNING *`,
+      [
+        dto.name, this.slugify(dto.slug), dto.logoUrl ?? null, dto.description ?? null,
+        dto.category, dto.authType, dto.apiBaseUrl ?? null, dto.oauthUrl ?? null,
+        dto.tokenUrl ?? null, dto.redirectUrl ?? null, JSON.stringify(dto.scopes ?? []),
+        JSON.stringify(dto.requiredFields ?? this.defaultRequiredFields(dto.slug, dto.authType)),
+        webhookSecret?.ciphertext ?? null, webhookSecret?.iv ?? null, webhookSecret?.authTag ?? null,
+        dto.apiVersion ?? null, dto.healthEndpoint ?? null, dto.documentationUrl ?? null,
+        JSON.stringify(dto.supportedFeatures ?? {}), JSON.stringify(dto.connectionWizard ?? {}),
+        dto.enabled ?? false, dto.maintenanceMode ?? false, dto.isDefault ?? false,
+        dto.priority ?? 100, dto.fallbackPriority ?? 100,
+      ],
+    );
+    await this.audit.log({
+      tenantId: '__system__',
+      actorId: adminId,
+      action: 'website_platform.upserted',
+      resource: 'website_platforms',
+      resourceId: result.rows[0].id,
+      details: { slug: result.rows[0].slug, enabled: result.rows[0].enabled },
+    });
+    return this.mapPlatformRow(result.rows[0]);
+  }
+
+  async updateWebsitePlatform(id: string, dto: UpdateWebsitePlatformDto, adminId: string): Promise<WebsitePlatform> {
+    const existing = await this.getWebsitePlatformById(id);
+    return this.createWebsitePlatform({
+      name: dto.name ?? existing.name,
+      slug: dto.slug ?? existing.slug,
+      logoUrl: dto.logoUrl ?? existing.logoUrl ?? undefined,
+      description: dto.description ?? existing.description ?? undefined,
+      category: (dto.category ?? existing.category) as any,
+      authType: (dto.authType ?? existing.authType) as any,
+      apiBaseUrl: dto.apiBaseUrl ?? existing.apiBaseUrl ?? undefined,
+      oauthUrl: dto.oauthUrl ?? existing.oauthUrl ?? undefined,
+      tokenUrl: dto.tokenUrl ?? existing.tokenUrl ?? undefined,
+      redirectUrl: dto.redirectUrl ?? existing.redirectUrl ?? undefined,
+      scopes: dto.scopes ?? existing.scopes,
+      requiredFields: dto.requiredFields ?? existing.requiredFields,
+      webhookSecret: dto.webhookSecret,
+      apiVersion: dto.apiVersion ?? existing.apiVersion ?? undefined,
+      healthEndpoint: dto.healthEndpoint ?? existing.healthEndpoint ?? undefined,
+      documentationUrl: dto.documentationUrl ?? existing.documentationUrl ?? undefined,
+      supportedFeatures: dto.supportedFeatures ?? existing.supportedFeatures,
+      connectionWizard: dto.connectionWizard ?? existing.connectionWizard,
+      enabled: dto.enabled ?? existing.enabled,
+      maintenanceMode: dto.maintenanceMode ?? existing.maintenanceMode,
+      isDefault: dto.isDefault ?? existing.isDefault,
+      priority: dto.priority ?? existing.priority,
+      fallbackPriority: dto.fallbackPriority ?? existing.fallbackPriority,
+    }, adminId);
+  }
+
+  async deleteWebsitePlatform(id: string, adminId: string): Promise<void> {
+    const platform = await this.getWebsitePlatformById(id);
+    await this.db.query(
+      `UPDATE website_platforms
+       SET enabled = false, maintenance_mode = true, deleted_at = NOW(), updated_at = NOW()
+       WHERE id = $1`,
+      [id],
+    );
+    await this.audit.log({
+      tenantId: '__system__',
+      actorId: adminId,
+      action: 'website_platform.deleted',
+      resource: 'website_platforms',
+      resourceId: id,
+      details: { slug: platform.slug },
+    });
+  }
+
+  async testWebsitePlatform(id: string, adminId: string): Promise<{ status: string; latencyMs: number | null; error?: string }> {
+    const platform = await this.getWebsitePlatformById(id);
+    const started = Date.now();
+    let status = 'unknown';
+    let error: string | undefined;
+    try {
+      if (platform.healthEndpoint) {
+        const response = await fetch(platform.healthEndpoint, { method: 'GET', signal: AbortSignal.timeout(8000) });
+        status = response.ok ? 'healthy' : 'degraded';
+        if (!response.ok) error = `HTTP ${response.status}`;
+      } else {
+        status = platform.enabled && !platform.maintenanceMode ? 'configured' : 'disabled';
+      }
+    } catch (err) {
+      status = 'unhealthy';
+      error = (err as Error).message;
+    }
+    const latencyMs = Date.now() - started;
+    await this.db.query(
+      `INSERT INTO platform_health (platform_id, status, latency_ms, error)
+       VALUES ($1,$2,$3,$4)`,
+      [id, status, latencyMs, error ?? null],
+    ).catch(() => undefined);
+    await this.audit.log({
+      tenantId: '__system__',
+      actorId: adminId,
+      action: 'website_platform.tested',
+      resource: 'website_platforms',
+      resourceId: id,
+      details: { slug: platform.slug, status, latencyMs },
+    });
+    return { status, latencyMs, error };
+  }
+
+  async getWebsitePlatformAnalytics(days = 30): Promise<unknown[]> {
+    const result = await this.db.query(
+      `SELECT p.slug, p.name,
+              COUNT(c.id)::int AS connected_stores,
+              COALESCE(SUM(u.orders_synced), 0)::int AS orders_synced,
+              COALESCE(SUM(u.products_synced), 0)::int AS products_synced,
+              COALESCE(AVG(h.latency_ms), 0)::int AS average_latency_ms,
+              COUNT(*) FILTER (WHERE l.status_code >= 400)::int AS connection_failures
+       FROM website_platforms p
+       LEFT JOIN user_platform_connections c ON c.platform_id = p.id AND c.is_active = true
+       LEFT JOIN platform_usage u ON u.platform_id = p.id AND u.created_at >= NOW() - ($1::int || ' days')::interval
+       LEFT JOIN platform_health h ON h.platform_id = p.id AND h.created_at >= NOW() - ($1::int || ' days')::interval
+       LEFT JOIN platform_api_logs l ON l.platform_id = p.id AND l.created_at >= NOW() - ($1::int || ' days')::interval
+       GROUP BY p.id, p.slug, p.name
+       ORDER BY connected_stores DESC, p.priority ASC`,
+      [days],
+    );
+    return result.rows;
+  }
+
+  async connectWebsitePlatform(
+    tenantId: string,
+    dto: ConnectWebsitePlatformDto,
+  ): Promise<UserPlatformConnection> {
+    const platform = await this.getEnabledPlatformBySlug(dto.platformSlug);
+    this.validateDynamicCredentials(platform, dto.credentials ?? {});
+    const encrypted = this.encrypt(JSON.stringify(dto.credentials ?? {}));
+    const result = await this.db.query(
+      `INSERT INTO user_platform_connections (
+         tenant_id, platform_id, account_label,
+         encrypted_credentials, credentials_iv, credentials_auth_tag,
+         metadata, connection_status, is_active, last_validated_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,'active',true,NOW())
+       ON CONFLICT (tenant_id, platform_id) DO UPDATE SET
+         account_label = EXCLUDED.account_label,
+         encrypted_credentials = EXCLUDED.encrypted_credentials,
+         credentials_iv = EXCLUDED.credentials_iv,
+         credentials_auth_tag = EXCLUDED.credentials_auth_tag,
+         metadata = EXCLUDED.metadata,
+         connection_status = 'active',
+         is_active = true,
+         last_validated_at = NOW(),
+         key_version = user_platform_connections.key_version + 1,
+         updated_at = NOW()
+       RETURNING *`,
+      [
+        tenantId, platform.id, dto.accountLabel ?? platform.name,
+        encrypted.ciphertext, encrypted.iv, encrypted.authTag,
+        JSON.stringify(dto.metadata ?? {}),
+      ],
+    );
+    await this.audit.log({
+      tenantId,
+      actorId: tenantId,
+      action: 'website_platform.connected',
+      resource: 'user_platform_connections',
+      resourceId: result.rows[0].id,
+      details: { platformSlug: platform.slug, accountLabel: dto.accountLabel },
+    });
+    return this.mapUserPlatformConnection(result.rows[0], platform);
+  }
+
+  async listUserPlatformConnections(tenantId: string): Promise<UserPlatformConnection[]> {
+    const result = await this.db.query(
+      `SELECT c.*, p.slug AS platform_slug, p.name AS platform_name
+       FROM user_platform_connections c
+       JOIN website_platforms p ON p.id = c.platform_id
+       WHERE c.tenant_id = $1 AND c.is_active = true
+       ORDER BY p.priority ASC, c.created_at DESC`,
+      [tenantId],
+    );
+    return result.rows.map(row => this.mapUserPlatformConnection(row));
+  }
+
+  async decryptWebsitePlatformForRuntime(tenantId: string, platformSlug: string): Promise<Record<string, string>> {
+    const result = await this.db.query(
+      `SELECT c.encrypted_credentials, c.credentials_iv, c.credentials_auth_tag
+       FROM user_platform_connections c
+       JOIN website_platforms p ON p.id = c.platform_id
+       WHERE c.tenant_id = $1 AND p.slug = $2 AND c.is_active = true AND p.enabled = true
+       LIMIT 1`,
+      [tenantId, this.slugify(platformSlug)],
+    );
+    if (result.rows.length === 0) throw new NotFoundException('Website platform connection not found');
+    const row = result.rows[0];
+    return JSON.parse(this.decrypt(row.encrypted_credentials, row.credentials_iv, row.credentials_auth_tag));
+  }
 
   // ── Connect a business account ────────────────────────────────────────────
 
@@ -224,36 +557,91 @@ export class UserBusinessConnectionsService {
     primaryToken: string | undefined,
     accountId: string | undefined,
   ): Promise<void> {
-    if (!primaryToken) return;
+    if (!primaryToken && !accountId) return;
+    // Legacy business connections intentionally use generic validation only.
+    // Website/ecommerce platform validation is fully database-driven through
+    // website_platforms.required_fields and health/config endpoints.
+    if (typeof platform !== 'string' || platform.trim().length === 0) {
+      throw new ConflictException('Platform slug is required');
+    }
+  }
 
-    const validators: Partial<Record<SupportedPlatform, () => Promise<void>>> = {
-      meta_ads: async () => {
-        const res = await fetch(
-          `https://graph.facebook.com/v21.0/me?access_token=${primaryToken}`,
-          { signal: AbortSignal.timeout(8000) },
-        );
-        if (res.status === 401) throw new Error('Invalid Meta access token');
-      },
-      shopify: async () => {
-        if (!accountId) throw new Error('Shopify store domain is required');
-        const domain = accountId.replace(/https?:\/\//, '').replace(/\/$/, '');
-        const res = await fetch(`https://${domain}/admin/api/2024-01/shop.json`, {
-          headers: { 'X-Shopify-Access-Token': primaryToken },
-          signal: AbortSignal.timeout(8000),
-        });
-        if (res.status === 401) throw new Error('Invalid Shopify access token');
-      },
-    };
+  private async getWebsitePlatformById(id: string): Promise<WebsitePlatform> {
+    const result = await this.db.query('SELECT * FROM website_platforms WHERE id = $1 AND deleted_at IS NULL', [id]);
+    if (result.rows.length === 0) throw new NotFoundException('Website platform not found');
+    return this.mapPlatformRow(result.rows[0]);
+  }
 
-    const validator = validators[platform];
-    if (validator) {
-      try { await validator(); }
-      catch (err) {
-        throw new ConflictException(
-          `${platform} credential validation failed: ${(err as Error).message}`,
-        );
+  private async getEnabledPlatformBySlug(slug: string): Promise<WebsitePlatform> {
+    const result = await this.db.query(
+      `SELECT * FROM website_platforms
+       WHERE slug = $1 AND enabled = true AND maintenance_mode = false AND deleted_at IS NULL
+       LIMIT 1`,
+      [this.slugify(slug)],
+    );
+    if (result.rows.length === 0) throw new NotFoundException('Website platform is not enabled');
+    return this.mapPlatformRow(result.rows[0]);
+  }
+
+  private validateDynamicCredentials(platform: WebsitePlatform, credentials: Record<string, string>): void {
+    for (const field of platform.requiredFields ?? []) {
+      const key = String(field.key ?? field.name ?? '');
+      const required = field.required !== false;
+      if (required && (!key || !credentials[key])) {
+        throw new BadRequestException(`Missing required field: ${field.label ?? key}`);
       }
     }
+    const urlFields = ['websiteUrl', 'apiBaseUrl', 'restApiUrl', 'graphqlUrl', 'webhookUrl'];
+    for (const field of urlFields) {
+      if (credentials[field] && !/^https?:\/\//i.test(credentials[field])) {
+        throw new BadRequestException(`${field} must be a valid http(s) URL`);
+      }
+    }
+  }
+
+  private defaultRequiredFields(slug: string, authType: string): Array<Record<string, unknown>> {
+    const normalized = this.slugify(slug);
+    if (normalized === 'custom-website') {
+      return [
+        { key: 'websiteUrl', label: 'Website URL', type: 'url', required: true },
+        { key: 'restApiUrl', label: 'REST API URL', type: 'url', required: true },
+        { key: 'graphqlUrl', label: 'GraphQL URL', type: 'url', required: false },
+        { key: 'authType', label: 'Authentication Type', type: 'select', required: true },
+        { key: 'apiKey', label: 'API Key / Token', type: 'password', required: false },
+        { key: 'webhookUrl', label: 'Webhook URL', type: 'url', required: false },
+        { key: 'webhookSecret', label: 'Webhook Secret', type: 'password', required: false },
+      ];
+    }
+    if (authType === 'oauth2') {
+      return [
+        { key: 'websiteUrl', label: 'Website URL', type: 'url', required: true },
+        { key: 'clientId', label: 'Client ID', type: 'text', required: true },
+        { key: 'clientSecret', label: 'Client Secret', type: 'password', required: true },
+      ];
+    }
+    if (authType === 'username_password') {
+      return [
+        { key: 'websiteUrl', label: 'Website URL', type: 'url', required: true },
+        { key: 'username', label: 'Username', type: 'text', required: true },
+        { key: 'password', label: 'Password', type: 'password', required: true },
+      ];
+    }
+    return [
+      { key: 'websiteUrl', label: 'Website URL', type: 'url', required: true },
+      { key: 'apiKey', label: authType === 'bearer_token' ? 'Bearer Token' : 'API Key', type: 'password', required: true },
+      { key: 'webhookSecret', label: 'Webhook Secret', type: 'password', required: false },
+    ];
+  }
+
+  private slugify(value: string): string {
+    return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  }
+
+  private parseJson<T>(value: unknown, fallback: T): T {
+    if (value === null || value === undefined) return fallback;
+    if (typeof value === 'object') return value as T;
+    try { return JSON.parse(String(value)) as T; }
+    catch { return fallback; }
   }
 
   // ── Crypto helpers ────────────────────────────────────────────────────────
@@ -305,6 +693,53 @@ export class UserBusinessConnectionsService {
       lastValidatedAt:  row.last_validated_at,
       createdAt:        row.created_at,
       updatedAt:        row.updated_at,
+    };
+  }
+
+  private mapPlatformRow(row: any): WebsitePlatform {
+    return {
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      logoUrl: row.logo_url ?? null,
+      description: row.description ?? null,
+      category: row.category,
+      authType: row.auth_type,
+      apiBaseUrl: row.api_base_url ?? null,
+      oauthUrl: row.oauth_url ?? null,
+      tokenUrl: row.token_url ?? null,
+      redirectUrl: row.redirect_url ?? null,
+      scopes: this.parseJson<string[]>(row.scopes, []),
+      requiredFields: this.parseJson<Array<Record<string, unknown>>>(row.required_fields, []),
+      apiVersion: row.api_version ?? null,
+      healthEndpoint: row.health_endpoint ?? null,
+      documentationUrl: row.documentation_url ?? null,
+      supportedFeatures: this.parseJson<Record<string, boolean>>(row.supported_features, {}),
+      connectionWizard: this.parseJson<Record<string, unknown>>(row.connection_wizard, {}),
+      enabled: Boolean(row.enabled),
+      maintenanceMode: Boolean(row.maintenance_mode),
+      isDefault: Boolean(row.is_default),
+      priority: Number(row.priority ?? 100),
+      fallbackPriority: Number(row.fallback_priority ?? 100),
+      connectionStatus: row.connection_status ?? undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private mapUserPlatformConnection(row: any, platform?: WebsitePlatform): UserPlatformConnection {
+    return {
+      id: row.id,
+      tenantId: row.tenant_id,
+      platformId: row.platform_id,
+      platformSlug: row.platform_slug ?? platform?.slug ?? '',
+      platformName: row.platform_name ?? platform?.name ?? '',
+      accountLabel: row.account_label ?? null,
+      connectionStatus: row.connection_status,
+      isActive: Boolean(row.is_active),
+      lastValidatedAt: row.last_validated_at ?? null,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
     };
   }
 }

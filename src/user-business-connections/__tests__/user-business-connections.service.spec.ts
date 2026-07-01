@@ -65,6 +65,38 @@ const makeConnectionRow = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+const makeWebsitePlatformRow = (overrides: Record<string, unknown> = {}) => ({
+  id: 'platform-001',
+  name: 'Custom Commerce',
+  slug: 'custom-commerce',
+  logo_url: null,
+  description: 'Dynamic commerce platform',
+  category: 'custom_website',
+  auth_type: 'api_key',
+  api_base_url: 'https://example.com/api',
+  oauth_url: null,
+  token_url: null,
+  redirect_url: null,
+  scopes: [],
+  required_fields: [
+    { key: 'websiteUrl', label: 'Website URL', type: 'url', required: true },
+    { key: 'apiKey', label: 'API Key', type: 'password', required: true },
+  ],
+  api_version: null,
+  health_endpoint: null,
+  documentation_url: null,
+  supported_features: { productSync: true, orderSync: true },
+  connection_wizard: { mode: 'dynamic' },
+  enabled: true,
+  maintenance_mode: false,
+  is_default: false,
+  priority: 10,
+  fallback_priority: 20,
+  created_at: new Date(),
+  updated_at: new Date(),
+  ...overrides,
+});
+
 // ── suite ─────────────────────────────────────────────────────────────────────
 
 describe('UserBusinessConnectionsService', () => {
@@ -254,6 +286,107 @@ describe('UserBusinessConnectionsService', () => {
       await build();
       await expect(service.decryptForRuntime(TENANT_ID, 'meta_ads'))
         .rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('dynamic website platform management', () => {
+    it('creates admin-managed website platforms and encrypts webhook secrets', async () => {
+      const row = makeWebsitePlatformRow();
+      dbMock.query.mockResolvedValueOnce({ rows: [row], rowCount: 1 });
+      await build();
+
+      const result = await service.createWebsitePlatform({
+        name: 'Custom Commerce',
+        slug: 'custom-commerce',
+        category: 'custom_website',
+        authType: 'api_key',
+        webhookSecret: 'plain-webhook-secret',
+        requiredFields: [{ key: 'apiKey', label: 'API Key', type: 'password', required: true }],
+        enabled: true,
+      } as any, 'admin-1');
+
+      expect(result.slug).toBe('custom-commerce');
+      expect((result as any).webhookSecret).toBeUndefined();
+      const params = dbMock.query.mock.calls[0][1] as unknown[];
+      expect(params).not.toContain('plain-webhook-secret');
+      expect(auditMock.log).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'website_platform.upserted',
+      }));
+    });
+
+    it('lists only enabled website platforms for users', async () => {
+      dbMock.query.mockResolvedValueOnce({
+        rows: [makeWebsitePlatformRow({ slug: 'shopify', name: 'Shopify', enabled: true })],
+        rowCount: 1,
+      });
+      await build();
+
+      const platforms = await service.listEnabledWebsitePlatforms();
+
+      expect(platforms).toHaveLength(1);
+      expect(platforms[0].slug).toBe('shopify');
+      expect(dbMock.query.mock.calls[0][1]).toEqual([false]);
+    });
+
+    it('encrypts user platform credentials and returns no secret values', async () => {
+      const platform = makeWebsitePlatformRow();
+      const connectionRow = {
+        id: 'upc-001',
+        tenant_id: TENANT_ID,
+        platform_id: platform.id,
+        account_label: 'Main store',
+        connection_status: 'active',
+        is_active: true,
+        last_validated_at: new Date(),
+        created_at: new Date(),
+        updated_at: new Date(),
+      };
+      dbMock.query
+        .mockResolvedValueOnce({ rows: [platform], rowCount: 1 })
+        .mockResolvedValueOnce({ rows: [connectionRow], rowCount: 1 });
+      await build();
+
+      const result = await service.connectWebsitePlatform(TENANT_ID, {
+        platformSlug: 'custom-commerce',
+        accountLabel: 'Main store',
+        credentials: { websiteUrl: 'https://store.example.com', apiKey: 'secret-api-key' },
+      });
+
+      expect(result.platformSlug).toBe('custom-commerce');
+      expect((result as any).credentials).toBeUndefined();
+      const insertParams = dbMock.query.mock.calls[1][1] as unknown[];
+      expect(insertParams).not.toContain('secret-api-key');
+      expect(auditMock.log).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'website_platform.connected',
+      }));
+    });
+
+    it('rejects missing dynamic required fields', async () => {
+      dbMock.query.mockResolvedValueOnce({ rows: [makeWebsitePlatformRow()], rowCount: 1 });
+      await build();
+
+      await expect(service.connectWebsitePlatform(TENANT_ID, {
+        platformSlug: 'custom-commerce',
+        credentials: { websiteUrl: 'https://store.example.com' },
+      })).rejects.toThrow('Missing required field');
+    });
+
+    it('decrypts website platform credentials only for the owning tenant', async () => {
+      await build();
+      const encrypted = (service as any).encrypt(JSON.stringify({ apiKey: 'runtime-secret' }));
+      dbMock.query.mockResolvedValueOnce({
+        rows: [{
+          encrypted_credentials: encrypted.ciphertext,
+          credentials_iv: encrypted.iv,
+          credentials_auth_tag: encrypted.authTag,
+        }],
+        rowCount: 1,
+      });
+
+      const credentials = await service.decryptWebsitePlatformForRuntime(TENANT_ID, 'custom-commerce');
+
+      expect(credentials).toEqual({ apiKey: 'runtime-secret' });
+      expect(dbMock.query.mock.calls[0][1]).toEqual([TENANT_ID, 'custom-commerce']);
     });
   });
 

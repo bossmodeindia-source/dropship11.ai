@@ -258,6 +258,97 @@ export const integrations = {
     }),
 };
 
+// Dynamic Website Platform Management
+
+export interface WebsitePlatformField {
+  key?: string;
+  name?: string;
+  label?: string;
+  type?: string;
+  required?: boolean;
+  options?: string[];
+}
+
+export interface WebsitePlatform {
+  id: string;
+  name: string;
+  slug: string;
+  logoUrl?: string | null;
+  description?: string | null;
+  category: string;
+  authType: string;
+  apiBaseUrl?: string | null;
+  oauthUrl?: string | null;
+  tokenUrl?: string | null;
+  redirectUrl?: string | null;
+  scopes?: string[];
+  requiredFields?: WebsitePlatformField[];
+  apiVersion?: string | null;
+  healthEndpoint?: string | null;
+  documentationUrl?: string | null;
+  supportedFeatures?: Record<string, boolean>;
+  connectionWizard?: Record<string, unknown>;
+  enabled: boolean;
+  maintenanceMode: boolean;
+  isDefault: boolean;
+  priority: number;
+  fallbackPriority: number;
+  connectionStatus?: string;
+}
+
+export interface CreateWebsitePlatformDto {
+  name: string;
+  slug: string;
+  logoUrl?: string;
+  description?: string;
+  category: 'ecommerce' | 'marketplace' | 'cms' | 'erp' | 'pos' | 'custom_website';
+  authType: 'oauth2' | 'api_key' | 'bearer_token' | 'jwt' | 'username_password' | 'webhook' | 'custom' | 'none';
+  apiBaseUrl?: string;
+  oauthUrl?: string;
+  tokenUrl?: string;
+  redirectUrl?: string;
+  scopes?: string[];
+  requiredFields?: WebsitePlatformField[];
+  webhookSecret?: string;
+  apiVersion?: string;
+  healthEndpoint?: string;
+  documentationUrl?: string;
+  supportedFeatures?: Record<string, boolean>;
+  connectionWizard?: Record<string, unknown>;
+  enabled?: boolean;
+  maintenanceMode?: boolean;
+  isDefault?: boolean;
+  priority?: number;
+  fallbackPriority?: number;
+}
+
+export interface UserPlatformConnection {
+  id: string;
+  tenantId: string;
+  platformId: string;
+  platformSlug: string;
+  platformName: string;
+  accountLabel?: string | null;
+  connectionStatus: string;
+  isActive: boolean;
+  lastValidatedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const websitePlatforms = {
+  available: () => request<WebsitePlatform[]>('/website-platforms/available'),
+};
+
+export const userWebsiteConnections = {
+  list: () => request<UserPlatformConnection[]>('/user/business-connections/website'),
+  connect: (dto: { platformSlug: string; accountLabel?: string; credentials?: Record<string, string>; metadata?: Record<string, unknown> }) =>
+    request<UserPlatformConnection>('/user/business-connections/website/connect', {
+      method: 'POST',
+      body: JSON.stringify(dto),
+    }),
+};
+
 // â”€â”€ AI Providers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface AiProvider {
@@ -492,6 +583,26 @@ export const adminApi = {
   aiProviders: () => request<AiProvider[]>('/admin/ai-providers'),
   aiProviderPresets: () => request<CreateAiProviderDto[]>('/admin/ai-providers/presets'),
   aiProviderAnalytics: (days = 30) => request<unknown>(`/admin/ai-providers/analytics?days=${days}`),
+  websitePlatforms: () => request<WebsitePlatform[]>('/admin/website-platforms'),
+  websitePlatformPresets: () => request<Array<CreateWebsitePlatformDto & { presetKey?: string }>>('/admin/website-platforms/presets'),
+  websitePlatformAnalytics: (days = 30) => request<unknown[]>(`/admin/website-platforms/analytics?days=${days}`),
+  createWebsitePlatform: (dto: CreateWebsitePlatformDto) =>
+    request<WebsitePlatform>('/admin/website-platforms', {
+      method: 'POST',
+      body: JSON.stringify(dto),
+    }),
+  updateWebsitePlatform: (id: string, dto: Partial<CreateWebsitePlatformDto>) =>
+    request<WebsitePlatform>(`/admin/website-platforms/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(dto),
+    }),
+  deleteWebsitePlatform: (id: string) =>
+    request<void>(`/admin/website-platforms/${id}`, { method: 'DELETE' }),
+  testWebsitePlatform: (id: string) =>
+    request<{ status: string; latencyMs: number | null; error?: string }>(
+      `/admin/website-platforms/${id}/test`,
+      { method: 'POST' },
+    ),
   createAiProvider: (dto: CreateAiProviderDto) =>
     request<AiProvider>('/admin/ai-providers', {
       method: 'POST',
