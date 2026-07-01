@@ -117,7 +117,10 @@ function createWithdrawalDb() {
       result.rows = rows;
       return result;
     }),
-    transaction: jest.fn(async (fn: (tx: any) => Promise<unknown>) => fn(db)),
+    transaction: jest.fn(async (fn: (tx: any) => Promise<unknown>) => {
+      executeStep = 0;
+      return fn(db);
+    }),
   };
   return db;
 }
