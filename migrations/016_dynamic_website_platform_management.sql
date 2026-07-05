@@ -45,6 +45,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_website_platform_default_category
 CREATE TABLE IF NOT EXISTS user_platform_connections (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
   platform_id UUID NOT NULL REFERENCES website_platforms(id) ON DELETE RESTRICT,
   account_label TEXT,
   encrypted_credentials TEXT NOT NULL,
@@ -58,14 +59,30 @@ CREATE TABLE IF NOT EXISTS user_platform_connections (
   key_version INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (tenant_id, platform_id)
+  UNIQUE (tenant_id, user_id, platform_id)
 );
+
+ALTER TABLE user_platform_connections
+  ADD COLUMN IF NOT EXISTS user_id TEXT;
+
+UPDATE user_platform_connections
+SET user_id = tenant_id
+WHERE user_id IS NULL;
+
+ALTER TABLE user_platform_connections
+  ALTER COLUMN user_id SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_user_platform_connections_tenant
   ON user_platform_connections (tenant_id, is_active);
 
+CREATE INDEX IF NOT EXISTS idx_user_platform_connections_user
+  ON user_platform_connections (tenant_id, user_id, is_active);
+
 CREATE INDEX IF NOT EXISTS idx_user_platform_connections_platform
   ON user_platform_connections (platform_id, is_active);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_platform_connections_unique_user_platform
+  ON user_platform_connections (tenant_id, user_id, platform_id);
 
 CREATE TABLE IF NOT EXISTS platform_api_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -129,3 +146,20 @@ CREATE TABLE IF NOT EXISTS platform_webhooks (
 
 CREATE INDEX IF NOT EXISTS idx_platform_webhooks_platform_event
   ON platform_webhooks (platform_id, event_type, status);
+
+CREATE TABLE IF NOT EXISTS platform_webhook_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id TEXT NOT NULL,
+  platform_id UUID NOT NULL REFERENCES website_platforms(id) ON DELETE CASCADE,
+  event_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  payload_hash TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('processing','completed','failed','rejected','duplicate')),
+  rejection_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (tenant_id, platform_id, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_platform_webhook_events_tenant_platform
+  ON platform_webhook_events (tenant_id, platform_id, created_at DESC);

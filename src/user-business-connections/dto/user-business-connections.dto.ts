@@ -1,6 +1,6 @@
 // dto/user-business-connections.dto.ts
 import {
-  IsString, IsIn, IsOptional, IsArray, IsDateString, IsBoolean, IsNumber, IsObject,
+  IsString, IsIn, IsOptional, IsArray, IsDateString, IsBoolean, IsNumber, IsObject, IsUrl,
 } from 'class-validator';
 
 export type SupportedPlatform =
@@ -131,4 +131,54 @@ export class ConnectWebsitePlatformDto {
 
   @IsOptional() @IsObject()
   metadata?: Record<string, unknown>;
+}
+
+export class RotateWebsitePlatformCredentialsDto {
+  @IsObject()
+  credentials: Record<string, string>;
+
+  @IsOptional() @IsString()
+  reason?: string;
+}
+
+export class StoreOAuthStartDto {
+  @IsString()
+  platformSlug: string;
+
+  @IsUrl({ require_tld: false })
+  redirectUri: string;
+}
+
+export class StoreOAuthCallbackDto {
+  @IsString()
+  platformSlug: string;
+
+  @IsString()
+  state: string;
+
+  @IsUrl({ require_tld: false })
+  redirectUri: string;
+
+  @IsString()
+  code: string;
+
+  @IsOptional() @IsString()
+  refreshToken?: string;
+}
+
+export class StoreWebhookDto {
+  @IsString()
+  platformSlug: string;
+
+  @IsString()
+  eventId: string;
+
+  @IsString()
+  eventType: string;
+
+  @IsString()
+  signature: string;
+
+  @IsObject()
+  payload: Record<string, unknown>;
 }

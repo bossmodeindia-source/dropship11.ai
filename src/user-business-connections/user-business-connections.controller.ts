@@ -3,12 +3,18 @@ import {
   Controller, Get, Post, Patch, Delete,
   Param, Body, UseGuards, Request,
   ParseUUIDPipe, HttpCode, HttpStatus, Query,
+  Headers, BadRequestException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { UserBusinessConnectionsService } from './user-business-connections.service';
 import {
   ConnectBusinessAccountDto,
   ConnectWebsitePlatformDto,
   CreateWebsitePlatformDto,
+  RotateWebsitePlatformCredentialsDto,
+  StoreOAuthCallbackDto,
+  StoreOAuthStartDto,
+  StoreWebhookDto,
   UpdateWebsitePlatformDto,
 } from './dto/user-business-connections.dto';
 import { JwtAuthGuard, RolesGuard } from '../common/guards';
@@ -57,6 +63,7 @@ export class AdminWebsitePlatformsController {
   }
 
   @Post(':id/test')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @HttpCode(HttpStatus.OK)
   async test(@Param('id', ParseUUIDPipe) id: string, @Request() req: any) {
     return this.service.testWebsitePlatform(id, req.user.id);
@@ -93,6 +100,59 @@ export class UserBusinessConnectionsController {
     return { message: 'Account connected successfully', connection };
   }
 
+  @Get('website')
+  async listWebsite(@Request() req: any) {
+    return this.service.listUserPlatformConnections(req.user.tenantId, req.user.id ?? req.user.sub);
+  }
+
+  @Post('website/connect')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  async connectWebsite(
+    @Body() dto: ConnectWebsitePlatformDto,
+    @Request() req: any,
+  ) {
+    const connection = await this.service.connectWebsitePlatform(req.user.tenantId, req.user.id ?? req.user.sub, dto);
+    return { message: 'Website platform connected successfully', connection };
+  }
+
+  @Patch('website/:connectionId/rotate')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  async rotateWebsite(
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+    @Body() dto: RotateWebsitePlatformCredentialsDto,
+    @Request() req: any,
+  ) {
+    const connection = await this.service.rotateWebsitePlatformCredentials(
+      req.user.tenantId,
+      req.user.id ?? req.user.sub,
+      connectionId,
+      dto,
+    );
+    return { message: 'Store credentials rotated', connection };
+  }
+
+  @Delete('website/:connectionId')
+  @HttpCode(HttpStatus.OK)
+  async disconnectWebsite(
+    @Param('connectionId', ParseUUIDPipe) connectionId: string,
+    @Request() req: any,
+  ) {
+    await this.service.disconnectWebsitePlatform(req.user.tenantId, req.user.id ?? req.user.sub, connectionId);
+    return { message: 'Store disconnected' };
+  }
+
+  @Post('website/oauth/start')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  async startOAuth(@Body() dto: StoreOAuthStartDto, @Request() req: any) {
+    return this.service.startStoreOAuth(req.user.tenantId, req.user.id ?? req.user.sub, dto);
+  }
+
+  @Post('website/oauth/callback')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  async completeOAuth(@Body() dto: StoreOAuthCallbackDto, @Request() req: any) {
+    return this.service.completeStoreOAuth(req.user.tenantId, req.user.id ?? req.user.sub, dto);
+  }
+
   @Delete(':connectionId')
   @HttpCode(HttpStatus.OK)
   async disconnect(
@@ -102,18 +162,19 @@ export class UserBusinessConnectionsController {
     await this.service.disconnectAccount(req.user.tenantId, connectionId);
     return { message: 'Account disconnected' };
   }
+}
 
-  @Get('website')
-  async listWebsite(@Request() req: any) {
-    return this.service.listUserPlatformConnections(req.user.tenantId);
-  }
+@Controller('api/v1/store-webhooks')
+export class StoreProviderWebhooksController {
+  constructor(private readonly service: UserBusinessConnectionsService) {}
 
-  @Post('website/connect')
-  async connectWebsite(
-    @Body() dto: ConnectWebsitePlatformDto,
-    @Request() req: any,
+  @Post()
+  @HttpCode(HttpStatus.OK)
+  async receive(
+    @Headers('x-tenant-id') tenantId: string | undefined,
+    @Body() dto: StoreWebhookDto,
   ) {
-    const connection = await this.service.connectWebsitePlatform(req.user.tenantId, dto);
-    return { message: 'Website platform connected successfully', connection };
+    if (!tenantId) throw new BadRequestException('Missing tenant context');
+    return this.service.processStoreWebhook(tenantId, dto);
   }
 }

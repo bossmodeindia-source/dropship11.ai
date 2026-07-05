@@ -22,6 +22,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import * as crypto from 'crypto';
 import {
   UserBusinessConnectionsService,
   BusinessConnection,
@@ -36,6 +37,7 @@ process.env.ENCRYPTION_MASTER_KEY = 'aa'.repeat(32);
 // ── constants ────────────────────────────────────────────────────────────────
 
 const TENANT_ID     = 'tenant-biz-test';
+const USER_ID       = 'user-store-test';
 const CONN_ID       = 'bconn-uuid-001';
 const FAKE_TOKEN    = ['unit', 'test', 'meta', 'token'].join('-');
 const FAKE_ACCOUNT  = 'act_999000111';
@@ -92,6 +94,22 @@ const makeWebsitePlatformRow = (overrides: Record<string, unknown> = {}) => ({
   is_default: false,
   priority: 10,
   fallback_priority: 20,
+  created_at: new Date(),
+  updated_at: new Date(),
+  ...overrides,
+});
+
+const makeUserPlatformConnectionRow = (overrides: Record<string, unknown> = {}) => ({
+  id: 'upc-001',
+  tenant_id: TENANT_ID,
+  user_id: USER_ID,
+  platform_id: 'platform-001',
+  platform_slug: 'custom-commerce',
+  platform_name: 'Custom Commerce',
+  account_label: 'Main store',
+  connection_status: 'active',
+  is_active: true,
+  last_validated_at: new Date(),
   created_at: new Date(),
   updated_at: new Date(),
   ...overrides,
@@ -310,7 +328,7 @@ describe('UserBusinessConnectionsService', () => {
       const params = dbMock.query.mock.calls[0][1] as unknown[];
       expect(params).not.toContain('plain-webhook-secret');
       expect(auditMock.log).toHaveBeenCalledWith(expect.objectContaining({
-        action: 'website_platform.upserted',
+        action: 'STORE_PROVIDER_CREATED',
       }));
     });
 
@@ -330,23 +348,13 @@ describe('UserBusinessConnectionsService', () => {
 
     it('encrypts user platform credentials and returns no secret values', async () => {
       const platform = makeWebsitePlatformRow();
-      const connectionRow = {
-        id: 'upc-001',
-        tenant_id: TENANT_ID,
-        platform_id: platform.id,
-        account_label: 'Main store',
-        connection_status: 'active',
-        is_active: true,
-        last_validated_at: new Date(),
-        created_at: new Date(),
-        updated_at: new Date(),
-      };
+      const connectionRow = makeUserPlatformConnectionRow({ platform_id: platform.id });
       dbMock.query
         .mockResolvedValueOnce({ rows: [platform], rowCount: 1 })
         .mockResolvedValueOnce({ rows: [connectionRow], rowCount: 1 });
       await build();
 
-      const result = await service.connectWebsitePlatform(TENANT_ID, {
+      const result = await service.connectWebsitePlatform(TENANT_ID, USER_ID, {
         platformSlug: 'custom-commerce',
         accountLabel: 'Main store',
         credentials: { websiteUrl: 'https://store.example.com', apiKey: 'secret-api-key' },
@@ -356,8 +364,9 @@ describe('UserBusinessConnectionsService', () => {
       expect((result as any).credentials).toBeUndefined();
       const insertParams = dbMock.query.mock.calls[1][1] as unknown[];
       expect(insertParams).not.toContain('secret-api-key');
+      expect(insertParams).toContain(USER_ID);
       expect(auditMock.log).toHaveBeenCalledWith(expect.objectContaining({
-        action: 'website_platform.connected',
+        action: 'STORE_CONNECTED',
       }));
     });
 
@@ -365,7 +374,7 @@ describe('UserBusinessConnectionsService', () => {
       dbMock.query.mockResolvedValueOnce({ rows: [makeWebsitePlatformRow()], rowCount: 1 });
       await build();
 
-      await expect(service.connectWebsitePlatform(TENANT_ID, {
+      await expect(service.connectWebsitePlatform(TENANT_ID, USER_ID, {
         platformSlug: 'custom-commerce',
         credentials: { websiteUrl: 'https://store.example.com' },
       })).rejects.toThrow('Missing required field');
@@ -386,7 +395,129 @@ describe('UserBusinessConnectionsService', () => {
       const credentials = await service.decryptWebsitePlatformForRuntime(TENANT_ID, 'custom-commerce');
 
       expect(credentials).toEqual({ apiKey: 'runtime-secret' });
-      expect(dbMock.query.mock.calls[0][1]).toEqual([TENANT_ID, 'custom-commerce']);
+      expect(dbMock.query.mock.calls[0][1]).toEqual([TENANT_ID, 'custom-commerce', null]);
+    });
+
+    it('denies cross-user store connection access', async () => {
+      dbMock.query.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+      await build();
+
+      await expect(service.getUserPlatformConnection(TENANT_ID, 'other-user', 'upc-001'))
+        .rejects.toBeInstanceOf(NotFoundException);
+      expect(dbMock.query.mock.calls[0][1]).toEqual(['upc-001', TENANT_ID, 'other-user']);
+    });
+
+    it('blocks disabled providers from user connections', async () => {
+      dbMock.query.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+      await build();
+
+      await expect(service.connectWebsitePlatform(TENANT_ID, USER_ID, {
+        platformSlug: 'disabled-commerce',
+        credentials: { websiteUrl: 'https://store.example.com', apiKey: 'secret-api-key' },
+      })).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rotates credentials with encryption and audit logging', async () => {
+      const platform = makeWebsitePlatformRow();
+      const rotatedRow = makeUserPlatformConnectionRow();
+      dbMock.query
+        .mockResolvedValueOnce({ rows: [makeUserPlatformConnectionRow()], rowCount: 1 })
+        .mockResolvedValueOnce({ rows: [platform], rowCount: 1 })
+        .mockResolvedValueOnce({ rows: [rotatedRow], rowCount: 1 });
+      await build();
+
+      const result = await service.rotateWebsitePlatformCredentials(TENANT_ID, USER_ID, 'upc-001', {
+        credentials: { websiteUrl: 'https://store.example.com', apiKey: 'rotated-secret' },
+        reason: 'routine rotation',
+      });
+
+      expect(result.id).toBe('upc-001');
+      const updateParams = dbMock.query.mock.calls[2][1] as unknown[];
+      expect(updateParams).not.toContain('rotated-secret');
+      expect(auditMock.log).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'STORE_CREDENTIAL_ROTATED',
+      }));
+    });
+
+    it('rejects invalid webhook signatures', async () => {
+      await build();
+      const secret = (service as any).encrypt('webhook-secret');
+      dbMock.query.mockResolvedValueOnce({
+        rows: [makeWebsitePlatformRow({
+          webhook_secret_ciphertext: secret.ciphertext,
+          webhook_secret_iv: secret.iv,
+          webhook_secret_auth_tag: secret.authTag,
+        })],
+        rowCount: 1,
+      });
+
+      await expect(service.processStoreWebhook(TENANT_ID, {
+        platformSlug: 'custom-commerce',
+        eventId: 'evt-1',
+        eventType: 'orders/create',
+        signature: 'sha256=bad',
+        payload: { orderId: 'o-1' },
+      })).rejects.toThrow('Invalid webhook signature');
+      expect(auditMock.log).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'STORE_WEBHOOK_REJECTED',
+      }));
+    });
+
+    it('ignores duplicate webhooks after idempotency claim', async () => {
+      await build();
+      (service as any).webhookIdempotency = {
+        claim: jest.fn().mockResolvedValue({ claimed: false, duplicate: true }),
+        complete: jest.fn(),
+      };
+      const secret = (service as any).encrypt('webhook-secret');
+      const payload = { orderId: 'o-1' };
+      const signature = crypto.createHmac('sha256', 'webhook-secret').update(JSON.stringify(payload)).digest('hex');
+      dbMock.query.mockResolvedValueOnce({
+        rows: [makeWebsitePlatformRow({
+          webhook_secret_ciphertext: secret.ciphertext,
+          webhook_secret_iv: secret.iv,
+          webhook_secret_auth_tag: secret.authTag,
+        })],
+        rowCount: 1,
+      });
+
+      const result = await service.processStoreWebhook(TENANT_ID, {
+        platformSlug: 'custom-commerce',
+        eventId: 'evt-dup',
+        eventType: 'orders/create',
+        signature,
+        payload,
+      });
+
+      expect(result).toEqual({ processed: false, duplicate: true });
+      expect((service as any).webhookIdempotency.complete).not.toHaveBeenCalled();
+    });
+
+    it('rejects OAuth state mismatch', async () => {
+      dbMock.query.mockResolvedValueOnce({
+        rows: [makeWebsitePlatformRow({
+          auth_type: 'oauth2',
+          oauth_url: 'https://provider.example.com/oauth',
+          redirect_url: 'https://app.example.com/callback',
+        })],
+        rowCount: 1,
+      });
+      await build();
+
+      await expect(service.completeStoreOAuth(TENANT_ID, USER_ID, {
+        platformSlug: 'custom-commerce',
+        state: 'invalid.state',
+        redirectUri: 'https://app.example.com/callback',
+        code: 'code-1',
+      })).rejects.toThrow();
+    });
+
+    it('blocks product publishing without a valid store connection', async () => {
+      dbMock.query.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+      await build();
+
+      await expect(service.assertProductPublishAllowed(TENANT_ID, USER_ID, 'custom-commerce', 'prod-1'))
+        .rejects.toBeInstanceOf(ForbiddenException);
     });
   });
 

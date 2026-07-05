@@ -25,6 +25,9 @@ import {
   ConflictException,
   Inject,
   BadRequestException,
+  ForbiddenException,
+  UnauthorizedException,
+  Optional,
 } from '@nestjs/common';
 import { Pool } from 'pg';
 import * as crypto from 'crypto';
@@ -34,9 +37,14 @@ import {
   ConnectBusinessAccountDto,
   ConnectWebsitePlatformDto,
   CreateWebsitePlatformDto,
+  RotateWebsitePlatformCredentialsDto,
+  StoreOAuthCallbackDto,
+  StoreOAuthStartDto,
+  StoreWebhookDto,
   SupportedPlatform,
   UpdateWebsitePlatformDto,
 } from './dto/user-business-connections.dto';
+import { WebhookIdempotencyService } from '../common/webhook/webhook-idempotency.service';
 
 const ALGO   = 'aes-256-gcm';
 const IV_LEN = 12;
@@ -88,6 +96,7 @@ export interface WebsitePlatform {
 export interface UserPlatformConnection {
   id: string;
   tenantId: string;
+  userId: string;
   platformId: string;
   platformSlug: string;
   platformName: string;
@@ -106,6 +115,7 @@ export class UserBusinessConnectionsService {
   constructor(
     @Inject(DB_POOL) private readonly db: Pool,
     private readonly audit: AuditService,
+    @Optional() private readonly webhookIdempotency?: WebhookIdempotencyService,
   ) {}
 
   getWebsitePlatformPresets(): Array<CreateWebsitePlatformDto & { presetKey: string }> {
@@ -217,7 +227,7 @@ export class UserBusinessConnectionsService {
     await this.audit.log({
       tenantId: '__system__',
       actorId: adminId,
-      action: 'website_platform.upserted',
+      action: 'STORE_PROVIDER_CREATED',
       resource: 'website_platforms',
       resourceId: result.rows[0].id,
       details: { slug: result.rows[0].slug, enabled: result.rows[0].enabled },
@@ -227,7 +237,7 @@ export class UserBusinessConnectionsService {
 
   async updateWebsitePlatform(id: string, dto: UpdateWebsitePlatformDto, adminId: string): Promise<WebsitePlatform> {
     const existing = await this.getWebsitePlatformById(id);
-    return this.createWebsitePlatform({
+    const updated = await this.createWebsitePlatform({
       name: dto.name ?? existing.name,
       slug: dto.slug ?? existing.slug,
       logoUrl: dto.logoUrl ?? existing.logoUrl ?? undefined,
@@ -252,6 +262,15 @@ export class UserBusinessConnectionsService {
       priority: dto.priority ?? existing.priority,
       fallbackPriority: dto.fallbackPriority ?? existing.fallbackPriority,
     }, adminId);
+    await this.audit.log({
+      tenantId: '__system__',
+      actorId: adminId,
+      action: 'STORE_PROVIDER_UPDATED',
+      resource: 'website_platforms',
+      resourceId: id,
+      details: { slug: updated.slug, enabled: updated.enabled },
+    });
+    return updated;
   }
 
   async deleteWebsitePlatform(id: string, adminId: string): Promise<void> {
@@ -265,7 +284,7 @@ export class UserBusinessConnectionsService {
     await this.audit.log({
       tenantId: '__system__',
       actorId: adminId,
-      action: 'website_platform.deleted',
+      action: 'STORE_PROVIDER_DISABLED',
       resource: 'website_platforms',
       resourceId: id,
       details: { slug: platform.slug },
@@ -298,7 +317,7 @@ export class UserBusinessConnectionsService {
     await this.audit.log({
       tenantId: '__system__',
       actorId: adminId,
-      action: 'website_platform.tested',
+      action: 'STORE_PROVIDER_TESTED',
       resource: 'website_platforms',
       resourceId: id,
       details: { slug: platform.slug, status, latencyMs },
@@ -328,6 +347,7 @@ export class UserBusinessConnectionsService {
 
   async connectWebsitePlatform(
     tenantId: string,
+    userId: string,
     dto: ConnectWebsitePlatformDto,
   ): Promise<UserPlatformConnection> {
     const platform = await this.getEnabledPlatformBySlug(dto.platformSlug);
@@ -335,11 +355,11 @@ export class UserBusinessConnectionsService {
     const encrypted = this.encrypt(JSON.stringify(dto.credentials ?? {}));
     const result = await this.db.query(
       `INSERT INTO user_platform_connections (
-         tenant_id, platform_id, account_label,
+         tenant_id, user_id, platform_id, account_label,
          encrypted_credentials, credentials_iv, credentials_auth_tag,
          metadata, connection_status, is_active, last_validated_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,'active',true,NOW())
-       ON CONFLICT (tenant_id, platform_id) DO UPDATE SET
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',true,NOW())
+       ON CONFLICT (tenant_id, user_id, platform_id) DO UPDATE SET
          account_label = EXCLUDED.account_label,
          encrypted_credentials = EXCLUDED.encrypted_credentials,
          credentials_iv = EXCLUDED.credentials_iv,
@@ -350,17 +370,17 @@ export class UserBusinessConnectionsService {
          last_validated_at = NOW(),
          key_version = user_platform_connections.key_version + 1,
          updated_at = NOW()
-       RETURNING *`,
+      RETURNING *`,
       [
-        tenantId, platform.id, dto.accountLabel ?? platform.name,
+        tenantId, userId, platform.id, dto.accountLabel ?? platform.name,
         encrypted.ciphertext, encrypted.iv, encrypted.authTag,
         JSON.stringify(dto.metadata ?? {}),
       ],
     );
     await this.audit.log({
       tenantId,
-      actorId: tenantId,
-      action: 'website_platform.connected',
+      actorId: userId,
+      action: 'STORE_CONNECTED',
       resource: 'user_platform_connections',
       resourceId: result.rows[0].id,
       details: { platformSlug: platform.slug, accountLabel: dto.accountLabel },
@@ -368,30 +388,278 @@ export class UserBusinessConnectionsService {
     return this.mapUserPlatformConnection(result.rows[0], platform);
   }
 
-  async listUserPlatformConnections(tenantId: string): Promise<UserPlatformConnection[]> {
+  async listUserPlatformConnections(tenantId: string, userId: string): Promise<UserPlatformConnection[]> {
     const result = await this.db.query(
       `SELECT c.*, p.slug AS platform_slug, p.name AS platform_name
        FROM user_platform_connections c
        JOIN website_platforms p ON p.id = c.platform_id
-       WHERE c.tenant_id = $1 AND c.is_active = true
+       WHERE c.tenant_id = $1 AND c.user_id = $2 AND c.is_active = true
        ORDER BY p.priority ASC, c.created_at DESC`,
-      [tenantId],
+      [tenantId, userId],
     );
     return result.rows.map(row => this.mapUserPlatformConnection(row));
   }
 
-  async decryptWebsitePlatformForRuntime(tenantId: string, platformSlug: string): Promise<Record<string, string>> {
+  async decryptWebsitePlatformForRuntime(tenantId: string, platformSlug: string, userId?: string): Promise<Record<string, string>> {
     const result = await this.db.query(
       `SELECT c.encrypted_credentials, c.credentials_iv, c.credentials_auth_tag
        FROM user_platform_connections c
        JOIN website_platforms p ON p.id = c.platform_id
-       WHERE c.tenant_id = $1 AND p.slug = $2 AND c.is_active = true AND p.enabled = true
+       WHERE c.tenant_id = $1 AND p.slug = $2 AND ($3::text IS NULL OR c.user_id = $3)
+         AND c.is_active = true AND p.enabled = true
        LIMIT 1`,
-      [tenantId, this.slugify(platformSlug)],
+      [tenantId, this.slugify(platformSlug), userId ?? null],
     );
     if (result.rows.length === 0) throw new NotFoundException('Website platform connection not found');
     const row = result.rows[0];
     return JSON.parse(this.decrypt(row.encrypted_credentials, row.credentials_iv, row.credentials_auth_tag));
+  }
+
+  async getUserPlatformConnection(
+    tenantId: string,
+    userId: string,
+    connectionId: string,
+  ): Promise<UserPlatformConnection> {
+    const result = await this.db.query(
+      `SELECT c.*, p.slug AS platform_slug, p.name AS platform_name
+       FROM user_platform_connections c
+       JOIN website_platforms p ON p.id = c.platform_id
+       WHERE c.id = $1 AND c.tenant_id = $2 AND c.user_id = $3 AND c.is_active = true
+       LIMIT 1`,
+      [connectionId, tenantId, userId],
+    );
+    if (result.rows.length === 0) throw new NotFoundException('Store connection not found');
+    return this.mapUserPlatformConnection(result.rows[0]);
+  }
+
+  async disconnectWebsitePlatform(tenantId: string, userId: string, connectionId: string): Promise<void> {
+    const connection = await this.getUserPlatformConnection(tenantId, userId, connectionId);
+    await this.db.query(
+      `UPDATE user_platform_connections
+       SET is_active = false, connection_status = 'disabled', updated_at = NOW()
+       WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
+      [connectionId, tenantId, userId],
+    );
+    await this.audit.log({
+      tenantId,
+      actorId: userId,
+      action: 'STORE_DISCONNECTED',
+      resource: 'user_platform_connections',
+      resourceId: connectionId,
+      details: { platformSlug: connection.platformSlug },
+    });
+  }
+
+  async rotateWebsitePlatformCredentials(
+    tenantId: string,
+    userId: string,
+    connectionId: string,
+    dto: RotateWebsitePlatformCredentialsDto,
+  ): Promise<UserPlatformConnection> {
+    const owned = await this.getUserPlatformConnection(tenantId, userId, connectionId);
+    const platform = await this.getEnabledPlatformBySlug(owned.platformSlug);
+    this.validateDynamicCredentials(platform, dto.credentials);
+    const encrypted = this.encrypt(JSON.stringify(dto.credentials));
+    const result = await this.db.query(
+      `UPDATE user_platform_connections
+       SET encrypted_credentials = $1,
+           credentials_iv = $2,
+           credentials_auth_tag = $3,
+           key_version = key_version + 1,
+           last_validated_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $4 AND tenant_id = $5 AND user_id = $6
+       RETURNING *`,
+      [encrypted.ciphertext, encrypted.iv, encrypted.authTag, connectionId, tenantId, userId],
+    );
+    await this.audit.log({
+      tenantId,
+      actorId: userId,
+      action: 'STORE_CREDENTIAL_ROTATED',
+      resource: 'user_platform_connections',
+      resourceId: connectionId,
+      details: { platformSlug: owned.platformSlug, reason: dto.reason ?? null },
+    });
+    return this.mapUserPlatformConnection(result.rows[0], platform);
+  }
+
+  async startStoreOAuth(
+    tenantId: string,
+    userId: string,
+    dto: StoreOAuthStartDto,
+  ): Promise<{ authorizationUrl: string; state: string }> {
+    const platform = await this.getEnabledPlatformBySlug(dto.platformSlug);
+    if (platform.authType !== 'oauth2') throw new BadRequestException('Provider does not use OAuth');
+    this.assertAllowedRedirectUri(platform, dto.redirectUri);
+    if (!platform.oauthUrl) throw new BadRequestException('OAuth authorization URL is not configured');
+
+    const state = this.signOAuthState({
+      tenantId,
+      userId,
+      platformSlug: platform.slug,
+      redirectUri: dto.redirectUri,
+      nonce: crypto.randomBytes(16).toString('hex'),
+      exp: Date.now() + 10 * 60_000,
+    });
+    const url = new URL(platform.oauthUrl);
+    url.searchParams.set('state', state);
+    url.searchParams.set('redirect_uri', dto.redirectUri);
+    if (platform.scopes.length > 0) url.searchParams.set('scope', platform.scopes.join(' '));
+
+    await this.audit.log({
+      tenantId,
+      actorId: userId,
+      action: 'STORE_OAUTH_STARTED',
+      resource: 'website_platforms',
+      resourceId: platform.id,
+      details: { platformSlug: platform.slug, redirectUri: dto.redirectUri },
+    });
+    return { authorizationUrl: url.toString(), state };
+  }
+
+  async completeStoreOAuth(
+    tenantId: string,
+    userId: string,
+    dto: StoreOAuthCallbackDto,
+  ): Promise<{ ok: true; platformSlug: string }> {
+    const platform = await this.getEnabledPlatformBySlug(dto.platformSlug);
+    const state = this.verifyOAuthState(dto.state);
+    if (
+      state.tenantId !== tenantId ||
+      state.userId !== userId ||
+      state.platformSlug !== platform.slug ||
+      state.redirectUri !== dto.redirectUri
+    ) {
+      throw new UnauthorizedException('OAuth state mismatch');
+    }
+    this.assertAllowedRedirectUri(platform, dto.redirectUri);
+    if (dto.refreshToken) {
+      const encrypted = this.encrypt(JSON.stringify({
+        oauthCode: dto.code,
+        refreshToken: dto.refreshToken,
+      }));
+      await this.db.query(
+        `INSERT INTO user_platform_connections (
+           tenant_id, user_id, platform_id, account_label,
+           encrypted_credentials, credentials_iv, credentials_auth_tag,
+           metadata, connection_status, is_active, last_validated_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',true,NOW())
+         ON CONFLICT (tenant_id, user_id, platform_id) DO UPDATE SET
+           encrypted_credentials = EXCLUDED.encrypted_credentials,
+           credentials_iv = EXCLUDED.credentials_iv,
+           credentials_auth_tag = EXCLUDED.credentials_auth_tag,
+           metadata = EXCLUDED.metadata,
+           key_version = user_platform_connections.key_version + 1,
+           updated_at = NOW()`,
+        [
+          tenantId, userId, platform.id, platform.name,
+          encrypted.ciphertext, encrypted.iv, encrypted.authTag,
+          JSON.stringify({ oauth: true }),
+        ],
+      );
+    }
+    await this.audit.log({
+      tenantId,
+      actorId: userId,
+      action: 'STORE_CONNECTED',
+      resource: 'user_platform_connections',
+      resourceId: platform.id,
+      details: { platformSlug: platform.slug, oauth: true },
+    });
+    return { ok: true, platformSlug: platform.slug };
+  }
+
+  async processStoreWebhook(
+    tenantId: string,
+    dto: StoreWebhookDto,
+  ): Promise<{ processed: boolean; duplicate: boolean }> {
+    const platformRow = await this.getPlatformSecretRow(dto.platformSlug);
+    if (!platformRow.enabled || platformRow.maintenance_mode || platformRow.deleted_at) {
+      throw new NotFoundException('Website platform is not enabled');
+    }
+
+    const webhookSecret = this.decryptWebhookSecret(platformRow);
+    const valid = this.verifyWebhookSignature(webhookSecret, dto.payload, dto.signature);
+    if (!valid) {
+      await this.recordWebhookEvent(tenantId, platformRow.id, dto, 'rejected', 'invalid_signature');
+      await this.audit.log({
+        tenantId,
+        actorId: tenantId,
+        action: 'STORE_WEBHOOK_REJECTED',
+        resource: 'platform_webhooks',
+        resourceId: platformRow.id,
+        details: { platformSlug: platformRow.slug, eventId: dto.eventId, eventType: dto.eventType },
+      });
+      throw new UnauthorizedException('Invalid webhook signature');
+    }
+
+    const claim = this.webhookIdempotency
+      ? await this.webhookIdempotency.claim('generic', `${platformRow.slug}:${dto.eventId}`, dto.payload, tenantId)
+      : { claimed: true, duplicate: false };
+    if (!claim.claimed) {
+      await this.recordWebhookEvent(tenantId, platformRow.id, dto, 'duplicate');
+      return { processed: false, duplicate: true };
+    }
+    await this.recordWebhookEvent(tenantId, platformRow.id, dto, 'processing');
+
+    await this.db.query(
+      `INSERT INTO platform_api_logs
+         (tenant_id, platform_id, operation, endpoint, method, status_code, latency_ms)
+       VALUES ($1,$2,$3,$4,'POST',200,0)`,
+      [tenantId, platformRow.id, `webhook:${dto.eventType}`, `/webhooks/store/${platformRow.slug}`],
+    ).catch(() => undefined);
+    await this.audit.log({
+      tenantId,
+      actorId: tenantId,
+      action: 'STORE_WEBHOOK_RECEIVED',
+      resource: 'platform_webhooks',
+      resourceId: platformRow.id,
+      details: { platformSlug: platformRow.slug, eventId: dto.eventId, eventType: dto.eventType },
+    });
+    if (dto.eventType.toLowerCase().includes('order')) {
+      await this.audit.log({
+        tenantId,
+        actorId: tenantId,
+        action: 'ORDER_SYNCED',
+        resource: 'platform_webhooks',
+        resourceId: platformRow.id,
+        details: { platformSlug: platformRow.slug, eventId: dto.eventId },
+      });
+    }
+    if (this.webhookIdempotency) {
+      await this.webhookIdempotency.complete('generic', `${platformRow.slug}:${dto.eventId}`, tenantId);
+    }
+    await this.recordWebhookEvent(tenantId, platformRow.id, dto, 'completed');
+    return { processed: true, duplicate: false };
+  }
+
+  async assertProductPublishAllowed(
+    tenantId: string,
+    userId: string,
+    platformSlug: string,
+    productId: string,
+  ): Promise<void> {
+    const result = await this.db.query(
+      `SELECT c.id
+       FROM user_platform_connections c
+       JOIN website_platforms p ON p.id = c.platform_id
+       WHERE c.tenant_id = $1 AND c.user_id = $2 AND p.slug = $3
+         AND c.is_active = true AND c.connection_status = 'active'
+         AND p.enabled = true AND p.maintenance_mode = false AND p.deleted_at IS NULL
+       LIMIT 1`,
+      [tenantId, userId, this.slugify(platformSlug)],
+    );
+    if (result.rows.length === 0) {
+      throw new ForbiddenException('Valid store connection required before publishing products');
+    }
+    await this.audit.log({
+      tenantId,
+      actorId: userId,
+      action: 'PRODUCT_PUBLISHED',
+      resource: 'products',
+      resourceId: productId,
+      details: { platformSlug: this.slugify(platformSlug) },
+    });
   }
 
   // ── Connect a business account ────────────────────────────────────────────
@@ -644,6 +912,96 @@ export class UserBusinessConnectionsService {
     catch { return fallback; }
   }
 
+  private async getPlatformSecretRow(slug: string): Promise<any> {
+    const result = await this.db.query(
+      `SELECT *
+       FROM website_platforms
+       WHERE slug = $1 AND deleted_at IS NULL
+       LIMIT 1`,
+      [this.slugify(slug)],
+    );
+    if (result.rows.length === 0) throw new NotFoundException('Website platform not found');
+    return result.rows[0];
+  }
+
+  private decryptWebhookSecret(row: any): string {
+    if (!row.webhook_secret_ciphertext || !row.webhook_secret_iv || !row.webhook_secret_auth_tag) {
+      throw new UnauthorizedException('Webhook secret not configured');
+    }
+    return this.decrypt(row.webhook_secret_ciphertext, row.webhook_secret_iv, row.webhook_secret_auth_tag);
+  }
+
+  private verifyWebhookSignature(secret: string, payload: unknown, signature: string): boolean {
+    const body = typeof payload === 'string' ? payload : JSON.stringify(payload);
+    const expectedHex = crypto.createHmac('sha256', secret).update(body).digest('hex');
+    const normalized = signature.startsWith('sha256=') ? signature.slice('sha256='.length) : signature;
+    return this.safeEqual(expectedHex, normalized);
+  }
+
+  private async recordWebhookEvent(
+    tenantId: string,
+    platformId: string,
+    dto: StoreWebhookDto,
+    status: 'processing' | 'completed' | 'failed' | 'rejected' | 'duplicate',
+    rejectionReason?: string,
+  ): Promise<void> {
+    await this.db.query(
+      `INSERT INTO platform_webhook_events
+         (tenant_id, platform_id, event_id, event_type, payload_hash, status, rejection_reason)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (tenant_id, platform_id, event_id) DO UPDATE SET
+         status = EXCLUDED.status,
+         rejection_reason = EXCLUDED.rejection_reason,
+         updated_at = NOW()`,
+      [
+        tenantId,
+        platformId,
+        dto.eventId,
+        dto.eventType,
+        crypto.createHash('sha256').update(JSON.stringify(dto.payload)).digest('hex'),
+        status,
+        rejectionReason ?? null,
+      ],
+    ).catch(() => undefined);
+  }
+
+  private safeEqual(a: string, b: string): boolean {
+    const left = Buffer.from(a);
+    const right = Buffer.from(b);
+    if (left.length !== right.length) return false;
+    return crypto.timingSafeEqual(left, right);
+  }
+
+  private assertAllowedRedirectUri(platform: WebsitePlatform, redirectUri: string): void {
+    const allowed = new Set<string>();
+    if (platform.redirectUrl) allowed.add(platform.redirectUrl);
+    const wizardAllowed = (platform.connectionWizard?.allowedRedirectUris ?? []) as unknown;
+    if (Array.isArray(wizardAllowed)) {
+      for (const uri of wizardAllowed) allowed.add(String(uri));
+    }
+    if (allowed.size > 0 && !allowed.has(redirectUri)) {
+      throw new BadRequestException('Redirect URI is not allowed for this provider');
+    }
+  }
+
+  private signOAuthState(payload: Record<string, unknown>): string {
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const sig = crypto.createHmac('sha256', this.getMasterKey()).update(body).digest('base64url');
+    return `${body}.${sig}`;
+  }
+
+  private verifyOAuthState(state: string): any {
+    const [body, sig] = state.split('.');
+    if (!body || !sig) throw new UnauthorizedException('Invalid OAuth state');
+    const expected = crypto.createHmac('sha256', this.getMasterKey()).update(body).digest('base64url');
+    if (!this.safeEqual(expected, sig)) throw new UnauthorizedException('OAuth state mismatch');
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (!payload.exp || Number(payload.exp) < Date.now()) {
+      throw new UnauthorizedException('OAuth state expired');
+    }
+    return payload;
+  }
+
   // ── Crypto helpers ────────────────────────────────────────────────────────
 
   private getMasterKey(): Buffer {
@@ -731,6 +1089,7 @@ export class UserBusinessConnectionsService {
     return {
       id: row.id,
       tenantId: row.tenant_id,
+      userId: row.user_id ?? row.tenant_id,
       platformId: row.platform_id,
       platformSlug: row.platform_slug ?? platform?.slug ?? '',
       platformName: row.platform_name ?? platform?.name ?? '',

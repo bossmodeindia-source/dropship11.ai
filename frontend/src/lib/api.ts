@@ -325,6 +325,7 @@ export interface CreateWebsitePlatformDto {
 export interface UserPlatformConnection {
   id: string;
   tenantId: string;
+  userId?: string;
   platformId: string;
   platformSlug: string;
   platformName: string;
@@ -344,6 +345,23 @@ export const userWebsiteConnections = {
   list: () => request<UserPlatformConnection[]>('/user/business-connections/website'),
   connect: (dto: { platformSlug: string; accountLabel?: string; credentials?: Record<string, string>; metadata?: Record<string, unknown> }) =>
     request<UserPlatformConnection>('/user/business-connections/website/connect', {
+      method: 'POST',
+      body: JSON.stringify(dto),
+    }),
+  rotate: (connectionId: string, dto: { credentials: Record<string, string>; reason?: string }) =>
+    request<{ message: string; connection: UserPlatformConnection }>(`/user/business-connections/website/${connectionId}/rotate`, {
+      method: 'PATCH',
+      body: JSON.stringify(dto),
+    }),
+  disconnect: (connectionId: string) =>
+    request<{ message: string }>(`/user/business-connections/website/${connectionId}`, { method: 'DELETE' }),
+  startOAuth: (dto: { platformSlug: string; redirectUri: string }) =>
+    request<{ authorizationUrl: string; state: string }>('/user/business-connections/website/oauth/start', {
+      method: 'POST',
+      body: JSON.stringify(dto),
+    }),
+  completeOAuth: (dto: { platformSlug: string; state: string; redirectUri: string; code: string; refreshToken?: string }) =>
+    request<{ ok: true; platformSlug: string }>('/user/business-connections/website/oauth/callback', {
       method: 'POST',
       body: JSON.stringify(dto),
     }),
